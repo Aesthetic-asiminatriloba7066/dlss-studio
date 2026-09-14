@@ -140,7 +140,7 @@ Scans and organizes your games automatically without manual configuration:
 
 - **DLSS 5 Swapper**: Original UI layout and desktop concept ([rakanki911/DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper)).
 - **Frame Generation & HDR Mods**: Integrates runtime hooks developed by **Otis_Inf** and the **RenoDX** / **RTX40MFG-Unlock** project teams.
-- **OptiScaler**: Open-source neural reconstruction wrapper developed by **cdozdil** ([OptiScaler](https://github.com/cdozdil/OptiScaler)).
+- **OptiScaler DLSS-NR & Pre-SR**: Specialized neural reconstruction & multi-pass wrapper developed by **wilsjo2** ([OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass)), based on upstream [OptiScaler](https://github.com/cdozdil/OptiScaler) by **cdozdil**.
 - **Rust Ecosystem**: Built using [Dioxus](https://dioxuslabs.com/), [mimalloc](https://github.com/microsoft/mimalloc), [pelite](https://github.com/CasualX/pelite), and native Win32 APIs.
 
 ---
