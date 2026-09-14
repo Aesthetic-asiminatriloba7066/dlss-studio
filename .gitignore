@@ -1,0 +1,5 @@
+/target
+/requirements
+/dist
+/payload
+*.exe

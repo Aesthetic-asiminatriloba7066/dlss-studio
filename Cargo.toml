@@ -1,0 +1,71 @@
+[workspace]
+members = [
+    ".",
+]
+
+[package]
+name = "dlss5-swapper-rust"
+version = "1.0.0"
+edition = "2021"
+default-run = "dlss-studio"
+description = "DLSS 5 Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"
+repository = "https://github.com/bookamp/dlss-studio"
+license = "MIT"
+
+[[bin]]
+name = "dlss-studio"
+path = "src/main.rs"
+
+[[bin]]
+name = "overlay_preview"
+path = "src/bin/overlay_preview.rs"
+test = false
+
+[[bin]]
+name = "dlss-studio-setup"
+path = "src/bin/setup.rs"
+test = false
+
+[dependencies]
+dioxus = { version = "0.6", features = ["desktop"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.5"
+pelite = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+keyvalues-parser = "0.2.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
+rfd = "0.14"
+windows = { version = "0.58", features = [
+    "Win32_Graphics_Dxgi",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_Security",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging"
+] }
+base64 = "0.22"
+mimalloc = { version = "0.1", default-features = false }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

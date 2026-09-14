@@ -1,0 +1,137 @@
+name: Build & Release DLSS 5 Swapper (RUST)
+
+"on":
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (leave empty for v<version> from Cargo.toml)'
+        required: false
+        default: ''
+      release_title:
+        description: 'Release title (leave empty for automatic commit title)'
+        required: false
+        default: ''
+      draft:
+        description: 'Publish as draft'
+        type: boolean
+        required: false
+        default: false
+      prerelease:
+        description: 'Publish as pre-release'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows Release & MSI Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Test Suite
+        run: cargo test --verbose
+
+      - name: Build Release Binaries (Setup & Portable)
+        shell: powershell
+        run: .\build_release.ps1
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlss-studio-windows-x64
+          path: |
+            target/release/dlss-studio-portable.exe
+            target/release/dlss-studio-setup.exe
+          if-no-files-found: error
+
+      - name: Prepare Release Notes & Commit Comments
+        id: release_meta
+        shell: bash
+        run: |
+          # 1. Determine release tag
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/' | tr -d ' "')
+          INPUT_TAG="${{ inputs.tag_name }}"
+          
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v${CARGO_VER}"
+          fi
+
+          # 2. Extract commit details and comments
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_SUBJECT=$(git log -1 --pretty=%s)
+          AUTHOR_NAME=$(git log -1 --pretty=%an)
+          COMMIT_DATE=$(git log -1 --pretty=%ad --date=format:'%Y-%m-%d %H:%M:%S UTC')
+
+          INPUT_TITLE="${{ inputs.release_title }}"
+          if [ -n "$INPUT_TITLE" ]; then
+            TITLE="$INPUT_TITLE"
+          elif [ -f "RELEASE_NOTES.md" ]; then
+            TITLE="${TAG} — Initial Release: DLSS 5 Studio"
+          else
+            TITLE="${TAG} — ${COMMIT_SUBJECT}"
+          fi
+
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "title=${TITLE}" >> $GITHUB_OUTPUT
+
+          # 3. Resolve release notes markdown
+          if [ -f "RELEASE_NOTES.md" ]; then
+            echo "body_file=RELEASE_NOTES.md" >> $GITHUB_OUTPUT
+          else
+            echo "body_file=generated_release_notes.md" >> $GITHUB_OUTPUT
+            echo "## Release Overview" > generated_release_notes.md
+            echo "" >> generated_release_notes.md
+            echo "### Latest Commit Details" >> generated_release_notes.md
+            echo "- **Commit:** \`${COMMIT_SHA}\`" >> generated_release_notes.md
+            echo "- **Author:** ${AUTHOR_NAME}" >> generated_release_notes.md
+            echo "- **Date:** ${COMMIT_DATE}" >> generated_release_notes.md
+            echo "- **Summary:** **${COMMIT_SUBJECT}**" >> generated_release_notes.md
+
+            HAS_BODY=$(git log -1 --pretty=%b)
+            if [ -n "$HAS_BODY" ]; then
+              echo "" >> generated_release_notes.md
+              echo "#### Commit Comments & Description:" >> generated_release_notes.md
+              git log -1 --pretty=%b >> generated_release_notes.md
+            fi
+
+            echo "" >> generated_release_notes.md
+            echo "- **\`dlss-studio-setup.exe\`**: Standalone Setup / Installer (Recommended) — Modern native Rust setup wizard with configurable install and data storage locations, Start Menu & Desktop shortcuts, Windows Add/Remove Programs registration" >> generated_release_notes.md
+            echo "- **\`dlss-studio-portable.exe\`**: Portable Executable — Standalone self-contained 64-bit Windows executable (includes embedded companion overlay add-on)" >> generated_release_notes.md
+          fi
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release_meta.outputs.title }}
+          body_path: ${{ steps.release_meta.outputs.body_file }}
+          files: |
+            target/release/dlss-studio-portable.exe
+            target/release/dlss-studio-setup.exe
+          generate_release_notes: true
+          make_latest: "true"
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
