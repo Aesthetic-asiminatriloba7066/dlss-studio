@@ -1669,7 +1669,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
     // EnableHooks=1 allows RenoDX to hook swapchain and direct presentation paths when native D3D12 NGX
     // is absent or bypassed (such as under DX11, Vulkan, or Feeder routes per AGENTS.md).
     configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "EnableHooks", "1");
-    configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NeuralUplift", "0");
+    configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NeuralUplift", "1");
     configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NREnableUpscaling", "0");
 
     if let Some(disabled) = get_ini(&configured_reshade_ini, "ADDON", "DisabledAddons") {
@@ -2608,6 +2608,7 @@ mod tests {
         assert!(ini_content.contains("[RenoDX.MFGUnlock]"), "[RenoDX.MFGUnlock] section must be written");
         assert!(ini_content.contains("ForceMultiplier=4"), "ForceMultiplier=4 must be written for 4x frame generation");
         assert!(ini_content.contains("EnableHooks=1"), "ReShade.ini in Feeder mode specifies EnableHooks=1 for swapchain and direct presentation interception");
+        assert!(ini_content.contains("NeuralUplift=1"), "ReShade.ini in Feeder mode specifies NeuralUplift=1 for Neural Rendering");
 
         // Verify root preset formatting
         let preset_content = fs::read_to_string(game_dir.join("ReShadePreset.ini")).unwrap();
@@ -2657,6 +2658,7 @@ mod tests {
         // 3. ReShade.ini content verification
         let ini_content = fs::read_to_string(game_dir.join("ReShade.ini")).unwrap();
         assert!(ini_content.contains("EnableHooks=1"), "ReShade.ini specifies EnableHooks=1 for swapchain and direct presentation interception");
+        assert!(ini_content.contains("NeuralUplift=1"), "ReShade.ini in DX11 Feeder mode specifies NeuralUplift=1 for Neural Rendering");
         assert!(!ini_content.contains("[RenoDX.MFGUnlock]"), "[RenoDX.MFGUnlock] section must NOT be written for DX11 titles without native DLSS-G");
 
         let _ = fs::remove_dir_all(&temp_dir);
