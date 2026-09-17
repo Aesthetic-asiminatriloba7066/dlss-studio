@@ -50,7 +50,20 @@ jobs:
 
       - name: Build Release Binaries (Setup & Portable)
         shell: powershell
-        run: .\build_release.ps1
+        run: |
+          $cargoToml = Get-Content -Path "Cargo.toml" -Raw
+          if ($cargoToml -match '(?m)^version\s*=\s*"([^"]+)"') {
+              $version = $matches[1]
+          } else {
+              $version = "1.0.0"
+          }
+          Write-Host "Building release binaries for v$version..."
+          cargo build --release --bin dlss-studio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --bin dlss-studio-setup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -Path "target\release\dlss-studio.exe" -Destination "target\release\dlss-studio-v$version-portable.exe" -Force
+          Copy-Item -Path "target\release\dlss-studio-setup.exe" -Destination "target\release\dlss-studio-v$version-setup.exe" -Force
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4

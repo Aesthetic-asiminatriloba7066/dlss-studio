@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "dlss5-swapper-rust"
-version = "1.0.2"
+version = "1.0.4"
 edition = "2021"
 default-run = "dlss-studio"
 description = "DLSS 5 Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"
@@ -15,11 +15,6 @@ license = "MIT"
 [[bin]]
 name = "dlss-studio"
 path = "src/main.rs"
-
-[[bin]]
-name = "overlay_preview"
-path = "src/bin/overlay_preview.rs"
-test = false
 
 [[bin]]
 name = "dlss-studio-setup"

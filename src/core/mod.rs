@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn test_app_version_matches_package() {
-        assert_eq!(APP_VERSION, "1.0.2");
+        assert_eq!(APP_VERSION, "1.0.4");
         assert!(!APP_VERSION.is_empty());
     }
 }

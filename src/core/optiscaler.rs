@@ -13,6 +13,7 @@ pub struct OptiScalerOptions {
     pub passes: u32,
     pub mfg_unlock: bool,
     pub target_exe_name: String,
+    pub nr_style: usize,
 }
 
 impl Default for OptiScalerOptions {
@@ -22,6 +23,7 @@ impl Default for OptiScalerOptions {
             passes: 3,
             mfg_unlock: false,
             target_exe_name: String::new(),
+            nr_style: 0,
         }
     }
 }
@@ -101,6 +103,7 @@ pub fn generate_optiscaler_ini(
     passes: u32,
     external_mfg: bool,
     target_exe: Option<&str>,
+    nr_style: usize,
 ) -> String {
     let mut text = base_text.to_string();
 
@@ -108,6 +111,9 @@ pub fn generate_optiscaler_ini(
     text = set_ini(&text, "DlssNr", "RunBeforeSR", if pre_sr { "true" } else { "false" });
     text = set_ini(&text, "DlssNr", "Passes", &passes.to_string());
     text = set_ini(&text, "DlssNr", "ApplyAfterRR", "true");
+    if pre_sr {
+        text = set_ini(&text, "DlssNr", "Style", &nr_style.to_string());
+    }
     text = set_ini(&text, "Plugins", "LoadReshade", "false");
     text = set_ini(&text, "FrameGen", "External", if external_mfg { "true" } else { "false" });
     text = set_ini(&text, "DLSSG", "InterpolationCount", "auto");
@@ -131,6 +137,7 @@ pub fn configure_optiscaler_ini(base_text: &str, opts: &OptiScalerOptions) -> St
         opts.passes,
         opts.mfg_unlock,
         Some(&opts.target_exe_name),
+        opts.nr_style,
     )
 }
 
@@ -571,6 +578,23 @@ pub struct DeployOptions {
     pub passes: u32,
     pub mfg_unlock: bool,
     pub mfg_multiplier: u32,
+    pub nr_style: usize,
+}
+
+impl Default for DeployOptions {
+    fn default() -> Self {
+        Self {
+            game_name: None,
+            game_dir: PathBuf::new(),
+            exe_path: PathBuf::new(),
+            api: "DirectX 12".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+            nr_style: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1102,6 +1126,7 @@ pub fn deploy_optiscaler_with_bundle(opts: &DeployOptions, payloads: &PayloadBun
         passes: opts.passes,
         mfg_unlock: opts.mfg_unlock,
         target_exe_name: opts.exe_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
+        nr_style: opts.nr_style,
     });
     track_and_write(&mut manifest, &opts.game_dir, &backup_dir, &mod_root.join("OptiScaler.ini"), &configured_ini, "config", &mut log)
         .map_err(|e| format!("Failed to write OptiScaler.ini: {}", e))?;
@@ -1336,6 +1361,7 @@ pub fn deploy_native_dlss5_with_bundle(opts: &DeployOptions, payloads: &PayloadB
     };
     configured_reshade_ini = set_ini(&configured_reshade_ini, "INPUT", "KeyOverlay", "36,0,0,0");
     configured_reshade_ini = set_ini(&configured_reshade_ini, "OVERLAY", "TutorialProgress", "4");
+    configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NRStyle", &opts.nr_style.to_string());
 
     if let Some(disabled) = get_ini(&configured_reshade_ini, "ADDON", "DisabledAddons") {
         let kept: Vec<&str> = disabled.split(',')
@@ -1580,7 +1606,7 @@ pub fn configure_dgvoodoo_conf(base: &str) -> String {
 }
 
 /// Formats ReShade.ini for host64 companion helper.
-pub fn configure_host64_reshade_ini() -> String {
+pub fn configure_host64_reshade_ini(nr_style: usize) -> String {
     let mut text = String::new();
     text = set_ini(&text, "INPUT", "KeyOverlay", "36,0,0,0");
     text = set_ini(&text, "OVERLAY", "TutorialProgress", "4");
@@ -1588,6 +1614,7 @@ pub fn configure_host64_reshade_ini() -> String {
     text = set_ini(&text, "RenoDX.DLSS5", "EnableHooks", "1");
     text = set_ini(&text, "RenoDX.DLSS5", "NeuralUplift", "1");
     text = set_ini(&text, "RenoDX.DLSS5", "NREnableUpscaling", "0");
+    text = set_ini(&text, "RenoDX.DLSS5", "NRStyle", &nr_style.to_string());
     text
 }
 
@@ -1909,7 +1936,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
                     }
 
                     // 5. Deploy host64 ReShade.ini
-                    let host_reshade_ini = configure_host64_reshade_ini();
+                    let host_reshade_ini = configure_host64_reshade_ini(opts.nr_style);
                     let host_ini_path = host64_dir.join("ReShade.ini");
                     track_and_write(&mut manifest, &opts.game_dir, &backup_dir, &host_ini_path, &host_reshade_ini, "config", &mut log)
                         .map_err(|e| format!("Failed to write host64/ReShade.ini: {}", e))?;
@@ -1980,6 +2007,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
     configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "EnableHooks", "1");
     configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NeuralUplift", "1");
     configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NREnableUpscaling", "0");
+    configured_reshade_ini = set_ini(&configured_reshade_ini, "RenoDX.DLSS5", "NRStyle", &opts.nr_style.to_string());
 
     if let Some(disabled) = get_ini(&configured_reshade_ini, "ADDON", "DisabledAddons") {
         let kept: Vec<&str> = disabled.split(',')
@@ -2169,6 +2197,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_optiscaler(&opts).expect("deploy should succeed");
@@ -2279,6 +2308,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         // 1. Deploy with custom addon registered and enabled
@@ -2358,6 +2388,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         // 1. Deploy Native DLSS 5
@@ -2433,6 +2464,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_native_dlss5(&opts).expect("deploy should succeed");
@@ -2486,6 +2518,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_native_dlss5(&opts).expect("deploy_native_dlss5 should succeed");
@@ -2562,6 +2595,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_native_dlss5(&opts).expect("deploy should succeed");
@@ -2622,8 +2656,11 @@ dgVoodooWatermark = false
             let feeder_dir = temp.join("mock_feeder");
             let feeder_shaders = feeder_dir.join("feeder-shaders");
             fs::create_dir_all(feeder_shaders.join("Shaders")).unwrap();
+            fs::create_dir_all(feeder_shaders.join("Textures")).unwrap();
             fs::write(feeder_shaders.join("Shaders").join("DLSS5_Feed.fx"), b"// mock feed").unwrap();
             fs::write(feeder_shaders.join("Shaders").join("vort_Motion.fx"), b"// mock motion").unwrap();
+            fs::write(feeder_shaders.join("Shaders").join("DrawText.fxh"), b"// mock drawtext").unwrap();
+            fs::write(feeder_shaders.join("Textures").join("FontAtlas.png"), b"MOCK_PNG").unwrap();
             let mock_addon64 = feeder_dir.join("dlss5-feed.addon64");
             fs::write(&mock_addon64, b"MOCK_FEEDER_ADDON_64").unwrap();
 
@@ -2702,6 +2739,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_optiscaler_with_bundle(&opts, &payloads).expect("deploy_optiscaler_with_bundle must succeed");
@@ -2752,6 +2790,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_optiscaler_with_bundle(&opts, &payloads).expect("deploy must succeed");
@@ -2792,6 +2831,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_optiscaler_with_bundle(&opts, &payloads).expect("deploy must succeed");
@@ -2862,6 +2902,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_native_dlss5_with_bundle(&opts, &payloads).expect("deploy_native_dlss5_with_bundle must succeed");
@@ -2904,6 +2945,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_native_dlss5_with_bundle(&opts, &payloads).expect("deploy must succeed");
@@ -2935,6 +2977,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle must succeed");
@@ -2947,6 +2990,8 @@ dgVoodooWatermark = false
         assert!(game_dir.join("renodx-dlss5.addon64").exists(), "renodx-dlss5.addon64 must be deployed for neural rendering");
         assert!(game_dir.join("nvngx_dlssnr.dll").exists(), "nvngx_dlssnr.dll must be deployed for neural rendering");
         assert!(game_dir.join("nvngx_dlss.dll").exists(), "nvngx_dlss.dll must be deployed for Streamline Feeder Super Sampling");
+        assert!(game_dir.join("reshade-shaders").join("Shaders").join("DrawText.fxh").exists(), "DrawText.fxh must be deployed");
+        assert!(game_dir.join("reshade-shaders").join("Textures").join("FontAtlas.png").exists(), "FontAtlas.png must be deployed");
 
         // 2. Strict Negative assertions: NO MFG (when mfg_unlock: false), NO Pre-SR, NO OptiScaler
         assert!(!game_dir.join("version.dll").exists(), "version.dll must NOT be in Feeder route");
@@ -2978,6 +3023,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle must succeed");
@@ -3025,6 +3071,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true, // User requested MFG in UI or options
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle must succeed for DX11");
@@ -3077,6 +3124,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle must succeed");
@@ -3118,6 +3166,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         // Deploy Route 1
@@ -3161,6 +3210,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
         deploy_optiscaler_with_bundle(&opti_opts, &payloads).unwrap();
         assert!(game_dir.join("OptiScaler.ini").exists());
@@ -3180,6 +3230,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
         deploy_native_dlss5_with_bundle(&reshade_opts, &payloads).unwrap();
 
@@ -3213,6 +3264,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res = deploy_optiscaler_with_bundle(&opts, &payloads);
@@ -3239,19 +3291,20 @@ dgVoodooWatermark = false
     fn test_generate_optiscaler_ini_all_combinations() {
         let base = "[DlssNr]\nEnabled=false\n\n[Plugins]\nLoadReshade=true\n";
 
-        // Case A: PreSR true, MFG true, exe provided
-        let res_a = generate_optiscaler_ini(base, true, 3, true, Some("CyberGame.exe"));
+        // Case A: PreSR true, MFG true, exe provided, nr_style 2 (Cinematic)
+        let res_a = generate_optiscaler_ini(base, true, 3, true, Some("CyberGame.exe"), 2);
         assert_eq!(get_ini(&res_a, "DlssNr", "Enabled"), Some("true".to_string()));
         assert_eq!(get_ini(&res_a, "DlssNr", "RunBeforeSR"), Some("true".to_string()));
         assert_eq!(get_ini(&res_a, "DlssNr", "Passes"), Some("3".to_string()));
         assert_eq!(get_ini(&res_a, "DlssNr", "ApplyAfterRR"), Some("true".to_string()));
+        assert_eq!(get_ini(&res_a, "DlssNr", "Style"), Some("2".to_string()));
         assert_eq!(get_ini(&res_a, "Plugins", "LoadReshade"), Some("false".to_string()));
         assert_eq!(get_ini(&res_a, "FrameGen", "External"), Some("true".to_string()));
         assert_eq!(get_ini(&res_a, "Menu", "ShortcutKey"), Some("0x2D".to_string()));
         assert_eq!(get_ini(&res_a, "Init", "TargetProcessName"), Some("CyberGame.exe".to_string()));
 
-        // Case B: PreSR false, MFG false, no exe
-        let res_b = generate_optiscaler_ini(base, false, 1, false, None);
+        // Case B: PreSR false, MFG false, no exe, nr_style 0
+        let res_b = generate_optiscaler_ini(base, false, 1, false, None, 0);
         assert_eq!(get_ini(&res_b, "DlssNr", "Enabled"), Some("false".to_string()));
         assert_eq!(get_ini(&res_b, "DlssNr", "RunBeforeSR"), Some("false".to_string()));
         assert_eq!(get_ini(&res_b, "DlssNr", "Passes"), Some("1".to_string()));
@@ -3337,6 +3390,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         // 1. Deploy Feeder route
@@ -3391,6 +3445,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         // Deploy Feeder route for OpenGL game
@@ -3437,6 +3492,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res1 = deploy_feeder_with_bundle(&feeder_opts, &payloads).expect("deploy feeder must succeed");
@@ -3459,6 +3515,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: true,
             mfg_multiplier: 4,
+            nr_style: 0,
         };
 
         let res2 = deploy_optiscaler_with_bundle(&opti_opts, &payloads).expect("deploy optiscaler must succeed");
@@ -3530,6 +3587,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         // Deploy Feeder: replaces genuine dxgi.dll with ReShade
@@ -3546,6 +3604,7 @@ dgVoodooWatermark = false
             passes: 2,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
         deploy_optiscaler_with_bundle(&opti_opts, &payloads).unwrap();
 
@@ -3559,6 +3618,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
         deploy_native_dlss5_with_bundle(&native_opts, &payloads).unwrap();
 
@@ -3606,6 +3666,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 32-bit must succeed");
@@ -3649,6 +3710,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 32-bit with dgVoodoo must succeed");
@@ -3732,6 +3794,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for D3D8 must succeed");
@@ -3792,6 +3855,7 @@ dgVoodooWatermark = false
             passes: 1,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
 
         let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 64-bit must succeed");
@@ -3812,6 +3876,79 @@ dgVoodooWatermark = false
 
         let manifest = crate::core::journal::read_manifest(&game_dir).expect("Active manifest must exist");
         assert_eq!(manifest.game.as_ref().and_then(|g| g.bitness), Some(64), "Manifest must record 64-bit architecture");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_nr_style_configuration_across_all_routes() {
+        let _state_lock = STATE_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = std::env::temp_dir().join(format!("test_nr_style_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let game_dir = temp_dir.join("TestGame");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let exe_path = game_dir.join("Game.exe");
+        fs::write(&exe_path, create_mock_pe64()).unwrap();
+
+        let payloads = PayloadBundle::create_mock(&temp_dir.join("payloads"));
+
+        // 1. Deploy Native Route with nr_style = 2 (Cinematic)
+        let native_opts = DeployOptions {
+            game_name: Some("Test Game".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 12".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+            nr_style: 2,
+        };
+        let res_native = deploy_native_dlss5_with_bundle(&native_opts, &payloads).expect("Native deploy must succeed");
+        assert!(res_native.success);
+
+        let reshade_ini = fs::read_to_string(game_dir.join("ReShade.ini")).expect("ReShade.ini must exist");
+        assert_eq!(get_ini(&reshade_ini, "RenoDX.DLSS5", "NRStyle"), Some("2".to_string()), "Native route must write NRStyle=2");
+
+        // 2. Verify scan_game_directory reads back nr_style = 2
+        let scanned = crate::core::scan::scan_game_directory(&game_dir).expect("Scan must find deployed game");
+        assert_eq!(scanned.nr_style, 2, "Scanner must detect nr_style = 2 from ReShade.ini");
+
+        // 3. Deploy Feeder Route with nr_style = 1 (Natural)
+        let feeder_opts = DeployOptions {
+            game_name: Some("Test Game".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 11".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+            nr_style: 1,
+        };
+        let res_feeder = deploy_feeder_with_bundle(&feeder_opts, &payloads).expect("Feeder deploy must succeed");
+        assert!(res_feeder.success);
+
+        let feeder_reshade_ini = fs::read_to_string(game_dir.join("ReShade.ini")).expect("ReShade.ini must exist for Feeder");
+        assert_eq!(get_ini(&feeder_reshade_ini, "RenoDX.DLSS5", "NRStyle"), Some("1".to_string()), "Feeder route must write NRStyle=1");
+
+        // 4. Deploy OptiScaler Route with Pre-SR and nr_style = 2
+        let opti_opts = DeployOptions {
+            game_name: Some("Test Game".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 12".to_string(),
+            pre_sr: true,
+            passes: 3,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+            nr_style: 2,
+        };
+        let res_opti = deploy_optiscaler_with_bundle(&opti_opts, &payloads).expect("OptiScaler deploy must succeed");
+        assert!(res_opti.success);
+
+        let opti_ini = fs::read_to_string(game_dir.join("OptiScaler.ini")).expect("OptiScaler.ini must exist");
+        assert_eq!(get_ini(&opti_ini, "DlssNr", "Style"), Some("2".to_string()), "OptiScaler route must write DlssNr Style=2");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

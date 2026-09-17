@@ -21,12 +21,52 @@ fn main() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| ".".to_string());
     let payload_dest = std::path::Path::new(&out_dir).join("installer_payload.bin");
-    let exe_path = std::path::Path::new("target/release/dlss-studio.exe");
-    let debug_exe_path = std::path::Path::new("target/debug/dlss-studio.exe");
-    if exe_path.exists() {
-        let _ = std::fs::copy(exe_path, &payload_dest);
-    } else if debug_exe_path.exists() {
-        let _ = std::fs::copy(debug_exe_path, &payload_dest);
+
+    let mut chosen_exe: Option<std::path::PathBuf> = None;
+
+    // 1. Prioritize clean release binary
+    let release_exe = std::path::PathBuf::from("target/release/dlss-studio.exe");
+    if release_exe.exists() {
+        chosen_exe = Some(release_exe);
+    } else if let Ok(entries) = std::fs::read_dir("target/release") {
+        // 2. Check for versioned portable release binary in target/release
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if name.starts_with("dlss-studio") && name.contains("portable") && name.ends_with(".exe") {
+                    chosen_exe = Some(path);
+                    break;
+                }
+            }
+        }
+    }
+
+    if chosen_exe.is_none() {
+        if let Ok(entries) = std::fs::read_dir("dist") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    if name.starts_with("dlss-studio") && name.contains("portable") && name.ends_with(".exe") {
+                        chosen_exe = Some(path);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback to debug only if no release binary exists anywhere
+    if chosen_exe.is_none() {
+        let debug_exe = std::path::PathBuf::from("target/debug/dlss-studio.exe");
+        if debug_exe.exists() {
+            chosen_exe = Some(debug_exe);
+        }
+    }
+
+    if let Some(src) = chosen_exe {
+        let _ = std::fs::copy(src, &payload_dest);
     } else if !payload_dest.exists() {
         let _ = std::fs::write(&payload_dest, &[]);
     }
