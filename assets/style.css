@@ -130,13 +130,15 @@ body::before {
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
 }
 
-:root[data-rust-theme="true"] .card-center-play {
+:root[data-rust-theme="true"] .card-center-play:not(.vanilla),
+:root[data-rust-theme="true"] .card-center-play.modded {
   border: 1px solid rgba(234, 88, 12, 0.75);
   color: var(--accent);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 20px rgba(245, 158, 11, 0.45);
 }
 
-:root[data-rust-theme="true"] .card-center-play:hover {
+:root[data-rust-theme="true"] .card-center-play:not(.vanilla):hover,
+:root[data-rust-theme="true"] .card-center-play.modded:hover {
   background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
   color: #ffffff;
   border-color: #f59e0b;
@@ -185,14 +187,136 @@ body::before {
 }
 
 :root[data-rust-theme="true"] .btn-install {
-  background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
-  color: #ffffff;
-  border: 1px solid #f59e0b;
-  box-shadow: 0 8px 22px rgba(234, 88, 12, 0.5), 0 0 14px rgba(245, 158, 11, 0.35);
+  background: rgba(12, 18, 24, 0.82);
+  color: var(--accent);
+  border: 1px solid rgba(234, 88, 12, 0.75);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 16px rgba(245, 158, 11, 0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root[data-rust-theme="true"] .btn-install:hover:not(:disabled) {
-  box-shadow: 0 12px 28px rgba(234, 88, 12, 0.7), 0 0 24px rgba(245, 158, 11, 0.5);
+  background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+  color: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 6px 26px rgba(234, 88, 12, 0.85), 0 0 32px rgba(245, 158, 11, 0.65);
+  transform: translateY(-1px);
+}
+
+:root[data-rust-theme="true"] .btn-install:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-install {
+  background: rgba(255, 255, 255, 0.88);
+  color: #c2410c;
+  border: 1px solid rgba(234, 88, 12, 0.7);
+  box-shadow: 0 3px 14px rgba(234, 88, 12, 0.25), 0 0 12px rgba(245, 158, 11, 0.2);
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-install:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+  color: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 6px 20px rgba(234, 88, 12, 0.6), 0 0 24px rgba(245, 158, 11, 0.45);
+}
+
+:root[data-rust-theme="true"] .btn-launch-hero:not(.vanilla),
+:root[data-rust-theme="true"] .btn-launch-hero.modded {
+  background: rgba(12, 18, 24, 0.82);
+  border: 1px solid rgba(234, 88, 12, 0.75);
+  color: var(--accent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 16px rgba(245, 158, 11, 0.35);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-rust-theme="true"] .btn-launch-hero:not(.vanilla) svg,
+:root[data-rust-theme="true"] .btn-launch-hero.modded svg {
+  fill: var(--accent);
+  transition: fill 0.18s ease;
+}
+
+:root[data-rust-theme="true"] .btn-launch-hero:not(.vanilla):hover,
+:root[data-rust-theme="true"] .btn-launch-hero.modded:hover {
+  background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+  color: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 6px 26px rgba(234, 88, 12, 0.85), 0 0 32px rgba(245, 158, 11, 0.65);
+  transform: translateY(-1px);
+}
+
+:root[data-rust-theme="true"] .btn-launch-hero:not(.vanilla):hover svg,
+:root[data-rust-theme="true"] .btn-launch-hero.modded:hover svg {
+  fill: #ffffff;
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero:not(.vanilla),
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero.modded {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(234, 88, 12, 0.7);
+  color: #c2410c;
+  box-shadow: 0 3px 14px rgba(234, 88, 12, 0.25), 0 0 12px rgba(245, 158, 11, 0.2);
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero:not(.vanilla) svg,
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero.modded svg {
+  fill: #c2410c;
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero:not(.vanilla):hover,
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero.modded:hover {
+  background: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+  color: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 6px 20px rgba(234, 88, 12, 0.6), 0 0 24px rgba(245, 158, 11, 0.45);
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero:not(.vanilla):hover svg,
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero.modded:hover svg {
+  fill: #ffffff;
+}
+
+:root[data-rust-theme="true"] .btn-restore {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #f87171;
+  background: rgba(18, 24, 32, 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-rust-theme="true"] .btn-restore:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.75);
+  color: #fca5a5;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Subtle rust/orange glow on hover for unmodded games in Rust theme */
+:root[data-rust-theme="true"] .card-center-play.vanilla:hover {
+  border-color: rgba(234, 88, 12, 0.65);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 18px rgba(245, 158, 11, 0.45);
+}
+
+:root[data-rust-theme="true"] .btn-launch-hero.vanilla:hover {
+  border-color: rgba(234, 88, 12, 0.65);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 18px rgba(245, 158, 11, 0.4);
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .card-center-play.vanilla:hover {
+  border-color: rgba(234, 88, 12, 0.55);
+  box-shadow: 0 4px 16px rgba(234, 88, 12, 0.25), 0 0 14px rgba(245, 158, 11, 0.3);
+}
+
+:root[data-rust-theme="true"][data-theme="light"] .btn-launch-hero.vanilla:hover {
+  border-color: rgba(234, 88, 12, 0.55);
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.22), 0 0 14px rgba(245, 158, 11, 0.25);
 }
 
 :root[data-rust-theme="true"] .addon.on {
@@ -1346,10 +1470,10 @@ button, input, select, textarea {
 }
 
 /* The one place the accent is allowed to glow: the primary action. */
-:root[data-theme="dark"] .btn-install {
+:root[data-theme="dark"]:not([data-rust-theme="true"]) .btn-install {
   box-shadow: 0 0 0 1px rgba(108, 193, 10, .35), 0 10px 30px rgba(108, 193, 10, .3);
 }
-:root[data-theme="dark"] .btn-install:hover:not(:disabled) {
+:root[data-theme="dark"]:not([data-rust-theme="true"]) .btn-install:hover:not(:disabled) {
   box-shadow: 0 0 0 1px rgba(108, 193, 10, .5), 0 14px 40px rgba(108, 193, 10, .45);
 }
 
@@ -1622,15 +1746,39 @@ body { cursor: default; }
   flex-shrink: 0;
 }
 
-[data-theme="light"] .btn-launch-hero {
+[data-theme="light"]:not([data-rust-theme="true"]) .btn-launch-hero {
   background: linear-gradient(135deg, rgba(108, 193, 10, .18), rgba(108, 193, 10, .08));
   color: #276202;
   border-color: rgba(47, 107, 3, .45);
 }
-[data-theme="light"] .btn-launch-hero:hover {
+[data-theme="light"]:not([data-rust-theme="true"]) .btn-launch-hero:hover {
   background: #3e8e04;
   color: #ffffff;
   border-color: #3e8e04;
+}
+
+/* Vanilla Unmodded Launch Hero */
+.btn-launch-hero.vanilla {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: var(--fg);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.btn-launch-hero.vanilla:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+[data-theme="light"] .btn-launch-hero.vanilla {
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.02));
+  color: #334155;
+  border-color: rgba(0, 0, 0, 0.18);
+}
+[data-theme="light"] .btn-launch-hero.vanilla:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #cbd5e1;
 }
 
 /* --- Centered Play Button on Game Cards (Hover) --- */
@@ -1677,6 +1825,31 @@ body { cursor: default; }
   border-color: var(--accent);
   box-shadow: 0 6px 26px rgba(108, 193, 10, 0.75), 0 0 32px rgba(108, 193, 10, 0.5);
   transform: translate(-50%, -50%) scale(1.08);
+}
+
+/* Vanilla Unmodded Play Button on Cards */
+.card-center-play.vanilla {
+  background: rgba(18, 24, 32, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+.card-center-play.vanilla:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
+}
+[data-theme="light"] .card-center-play.vanilla {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  color: #1e293b;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+[data-theme="light"] .card-center-play.vanilla:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
 }
 
 .card-center-play svg {

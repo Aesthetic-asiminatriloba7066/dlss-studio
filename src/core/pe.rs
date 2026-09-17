@@ -5,9 +5,12 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+pub const IMAGE_FILE_LARGE_ADDRESS_AWARE: u16 = 0x0020;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeInfo {
     pub bitness: u32,
+    pub is_laa: bool,
     pub version: Option<String>,
     pub imports: Vec<String>,
 }
@@ -16,7 +19,7 @@ pub fn inspect_pe<P: AsRef<Path>>(path: P) -> Option<PeInfo> {
     let map = FileMap::open(path.as_ref()).ok()?;
     let file = PeFile::from_bytes(map.as_ref()).ok()?;
 
-    let (bitness, imports) = match file {
+    let (bitness, is_laa, imports) = match file {
         Wrap::T32(pe32) => {
             let mut list = Vec::new();
             if let Ok(import_dir) = pe32.imports() {
@@ -26,7 +29,8 @@ pub fn inspect_pe<P: AsRef<Path>>(path: P) -> Option<PeInfo> {
                     }
                 }
             }
-            (32, list)
+            let is_laa = (pe32.file_header().Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) != 0;
+            (32, is_laa, list)
         }
         Wrap::T64(pe64) => {
             let mut list = Vec::new();
@@ -37,7 +41,7 @@ pub fn inspect_pe<P: AsRef<Path>>(path: P) -> Option<PeInfo> {
                     }
                 }
             }
-            (64, list)
+            (64, true, list)
         }
     };
 
@@ -45,9 +49,78 @@ pub fn inspect_pe<P: AsRef<Path>>(path: P) -> Option<PeInfo> {
 
     Some(PeInfo {
         bitness,
+        is_laa,
         version,
         imports,
     })
+}
+
+/// Checks whether an executable file has the IMAGE_FILE_LARGE_ADDRESS_AWARE (0x0020) flag set.
+pub fn is_large_address_aware<P: AsRef<Path>>(path: P) -> bool {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut dos_header = [0u8; 64];
+    if file.read_exact(&mut dos_header).is_err() {
+        return false;
+    }
+    if dos_header[0] != b'M' || dos_header[1] != b'Z' {
+        return false;
+    }
+    let e_lfanew = u32::from_le_bytes(dos_header[0x3C..0x40].try_into().unwrap()) as u64;
+    let char_offset = e_lfanew + 22;
+    if file.seek(SeekFrom::Start(char_offset)).is_err() {
+        return false;
+    }
+    let mut char_bytes = [0u8; 2];
+    if file.read_exact(&mut char_bytes).is_err() {
+        return false;
+    }
+    let characteristics = u16::from_le_bytes(char_bytes);
+    (characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) != 0
+}
+
+/// Sets or unsets the IMAGE_FILE_LARGE_ADDRESS_AWARE (0x0020) flag in a PE executable's header in-place.
+pub fn set_large_address_aware<P: AsRef<Path>>(path: P, enable: bool) -> std::io::Result<bool> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let path_ref = path.as_ref();
+    if let Ok(meta) = std::fs::metadata(path_ref) {
+        let mut perms = meta.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(path_ref, perms);
+        }
+    }
+
+    let mut file = OpenOptions::new().read(true).write(true).open(path_ref)?;
+    let mut dos_header = [0u8; 64];
+    file.read_exact(&mut dos_header)?;
+    if dos_header[0] != b'M' || dos_header[1] != b'Z' {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not an MZ binary"));
+    }
+    let e_lfanew = u32::from_le_bytes(dos_header[0x3C..0x40].try_into().unwrap()) as u64;
+    let char_offset = e_lfanew + 22;
+    file.seek(SeekFrom::Start(char_offset))?;
+    let mut char_bytes = [0u8; 2];
+    file.read_exact(&mut char_bytes)?;
+    let current_char = u16::from_le_bytes(char_bytes);
+    let new_char = if enable {
+        current_char | IMAGE_FILE_LARGE_ADDRESS_AWARE
+    } else {
+        current_char & !IMAGE_FILE_LARGE_ADDRESS_AWARE
+    };
+
+    if new_char != current_char {
+        file.seek(SeekFrom::Start(char_offset))?;
+        file.write_all(&new_char.to_le_bytes())?;
+        file.flush()?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 fn get_version_info(file: &PeFile) -> Option<String> {
@@ -221,7 +294,7 @@ pub fn is_optiscaler_or_proxy<P: AsRef<Path>>(path: P) -> bool {
                         for key in &["ProductName", "FileDescription", "CompanyName", "OriginalFilename", "InternalName"] {
                             if let Some(val) = vi.value(lang, key) {
                                 let lower = val.to_lowercase();
-                                if lower.contains("optiscaler") || lower.contains("nitec") || lower.contains("reshade") || lower.contains("rtxmfg") || lower.contains("dashdogy") {
+                                if lower.contains("optiscaler") || lower.contains("nitec") || lower.contains("reshade") || lower.contains("rtxmfg") || lower.contains("dashdogy") || lower.contains("dgvoodoo") {
                                     return true;
                                 }
                             }
@@ -232,7 +305,7 @@ pub fn is_optiscaler_or_proxy<P: AsRef<Path>>(path: P) -> bool {
         }
     }
 
-    let markers = ["OptiScaler", "nitec", "ReShade", "DLSS-NR", "RTXMFG", "Dashdogy", "Streamline"];
+    let markers = ["OptiScaler", "nitec", "ReShade", "DLSS-NR", "RTXMFG", "Dashdogy", "Streamline", "dgVoodoo"];
     !find_markers(p, &markers).is_empty()
 }
 
@@ -282,4 +355,58 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_large_address_aware_inspection_and_toggle() {
+        let temp_dir = std::env::temp_dir().join(format!("pe_laa_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let exe_path = temp_dir.join("TestGame32.exe");
+
+        // Construct minimal valid PE32 with Characteristics = 0x0103 (LAA = false)
+        let mut data = vec![0u8; 512];
+        data[0] = b'M';
+        data[1] = b'Z';
+        let pe_offset: u32 = 0x80;
+        data[0x3C..0x40].copy_from_slice(&pe_offset.to_le_bytes());
+
+        // PE signature
+        data[0x80..0x84].copy_from_slice(b"PE\0\0");
+        // Machine = i386 (0x014C)
+        data[0x84..0x86].copy_from_slice(&0x014Cu16.to_le_bytes());
+        // NumberOfSections = 1
+        data[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        // SizeOfOptionalHeader = 0xE0
+        data[0x94..0x96].copy_from_slice(&0x00E0u16.to_le_bytes());
+        // Characteristics = 0x0103 (IMAGE_FILE_32BIT_MACHINE | IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_RELOCS_STRIPPED)
+        data[0x96..0x98].copy_from_slice(&0x0103u16.to_le_bytes());
+        // Optional header magic = 0x010B (PE32)
+        data[0x98..0x9A].copy_from_slice(&0x010Bu16.to_le_bytes());
+
+        std::fs::write(&exe_path, &data).unwrap();
+
+        assert!(!is_large_address_aware(&exe_path), "Initial binary must not be LAA");
+        let pe_info = inspect_pe(&exe_path).expect("Must inspect synthetic PE");
+        assert_eq!(pe_info.bitness, 32);
+        assert!(!pe_info.is_laa, "PeInfo must report is_laa = false");
+
+        // Enable LAA
+        let changed = set_large_address_aware(&exe_path, true).expect("set_large_address_aware(true) must succeed");
+        assert!(changed, "Must report change made");
+        assert!(is_large_address_aware(&exe_path), "Binary must now be LAA");
+
+        let pe_info_after = inspect_pe(&exe_path).expect("Must inspect synthetic PE after LAA patch");
+        assert!(pe_info_after.is_laa, "PeInfo must report is_laa = true after patch");
+
+        // Re-enabling when already enabled should be a no-op
+        let changed2 = set_large_address_aware(&exe_path, true).expect("Re-enabling must succeed");
+        assert!(!changed2, "Should return false if already enabled");
+
+        // Disable LAA
+        let changed3 = set_large_address_aware(&exe_path, false).expect("Disabling must succeed");
+        assert!(changed3);
+        assert!(!is_large_address_aware(&exe_path));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
+

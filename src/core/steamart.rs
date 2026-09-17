@@ -245,6 +245,36 @@ pub fn handle_art_request(uri: &str) -> Option<(String, Vec<u8>)> {
     None
 }
 
+fn split_camel_or_numbers(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_char: Option<char> = None;
+    for c in s.chars() {
+        if let Some(p) = prev_char {
+            let is_lower_to_upper = p.is_lowercase() && c.is_uppercase();
+            let is_letter_to_digit = p.is_alphabetic() && c.is_numeric();
+            let is_digit_to_letter = p.is_numeric() && c.is_alphabetic();
+            if is_lower_to_upper || is_letter_to_digit || is_digit_to_letter {
+                out.push(' ');
+            }
+        }
+        out.push(c);
+        prev_char = Some(c);
+    }
+    out
+}
+
+async fn query_steam_api(client: &reqwest::Client, q: &str) -> Option<StoreSearchResult> {
+    let url = format!(
+        "https://store.steampowered.com/api/storesearch/?term={}&cc=us&l=en",
+        url_encode(q)
+    );
+    let res = client.get(&url).send().await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    res.json::<StoreSearchResult>().await.ok()
+}
+
 /// Searches Steam's public store endpoint for a matching game title and returns its AppID.
 pub async fn search_steam_appid(name: &str) -> Option<(u64, String)> {
     let query = clean_name(name);
@@ -252,25 +282,30 @@ pub async fn search_steam_appid(name: &str) -> Option<(u64, String)> {
         return None;
     }
 
-    let url = format!(
-        "https://store.steampowered.com/api/storesearch/?term={}&cc=us&l=en",
-        url_encode(&query)
-    );
-
     let client = reqwest::Client::builder()
         .user_agent("DLSS5-Swapper-Native/1.0")
         .build()
         .ok()?;
 
-    let res = client.get(&url).send().await.ok()?;
-    if !res.status().is_success() {
-        return None;
+    if let Some(data) = query_steam_api(&client, &query).await {
+        let items = data.items.unwrap_or_default();
+        if let Some(best) = pick_best(&items, &query) {
+            return Some((best.id, best.name.unwrap_or_else(|| query.to_string())));
+        }
     }
 
-    let data = res.json::<StoreSearchResult>().await.ok()?;
-    let items = data.items.unwrap_or_default();
-    let best = pick_best(&items, &query)?;
-    Some((best.id, best.name.unwrap_or_else(|| query.to_string())))
+    // Try secondary split query if query contains camelCase or numbers (e.g., Cyberpunk2077 -> Cyberpunk 2077)
+    let alt_query = clean_name(&split_camel_or_numbers(&query));
+    if alt_query != query && !alt_query.is_empty() {
+        if let Some(data) = query_steam_api(&client, &alt_query).await {
+            let items = data.items.unwrap_or_default();
+            if let Some(best) = pick_best(&items, &alt_query) {
+                return Some((best.id, best.name.unwrap_or_else(|| alt_query.to_string())));
+            }
+        }
+    }
+
+    None
 }
 
 /// Generates a filesystem-safe cache key for a game directory.

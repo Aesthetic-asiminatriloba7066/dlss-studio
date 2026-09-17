@@ -212,7 +212,7 @@ pub fn resolve_target_path(game_dir: &Path, rel: &str) -> PathBuf {
 
 pub fn is_proxy_hook(path: &Path) -> bool {
     let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
-    let hook_names = ["dxgi.dll", "winmm.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "opengl32.dll", "dinput8.dll", "version.dll"];
+    let hook_names = ["dxgi.dll", "winmm.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "d3d8.dll", "opengl32.dll", "dinput8.dll", "version.dll"];
     if hook_names.contains(&fname.as_str()) {
         return crate::core::pe::is_optiscaler_or_proxy(path) || crate::core::pe::is_reshade_dll(path).0;
     }
@@ -311,18 +311,22 @@ pub fn clean_untracked_mods_with_exe(game_dir: &Path, exe_path: Option<&Path>) -
                     || lower == "reshade.ini"
                     || lower == "reshade.log"
                     || lower == "reshade64.dll"
+                    || lower == "reshade32.dll"
                     || lower == "reshade64.json"
                     || lower == "reshadegui.ini"
                     || lower == "reshadepreset.ini"
                     || lower == "dlss5-feed.cfg"
-                    || lower == "nvngx.dll_dlssnr.dll"
-                    || lower == "nvngx_dlssnr.dll"
                     || lower == "dlss5-feed.log"
                     || lower == "dlss5-feed.addon64"
                     || lower == "dlss5-feed.addon32"
+                    || lower == "dlss5-feed-host64.exe"
                     || lower == "dlss5-lab-overlay.addon64"
                     || lower == "renodx-dlss5.addon64"
                     || lower == "renodx-mfgunlock.addon64"
+                    || lower == "dgvoodoo.conf"
+                    || lower == "dgvoodoo.log"
+                    || lower == "nvngx.dll_dlssnr.dll"
+                    || lower == "nvngx_dlssnr.dll"
                     || lower == "rtxmfg-universal.json"
                     || lower.starts_with("rtxmfg-")
                     || lower.ends_with(".addon64")
@@ -338,17 +342,17 @@ pub fn clean_untracked_mods_with_exe(game_dir: &Path, exe_path: Option<&Path>) -
                             return Err(std::io::Error::new(e.kind(), format!("Failed to remove {}: {}. Is the game or launcher still running?", fname, e)));
                         }
                     }
-                } else if lower == "optiscaler" && path.is_dir() {
+                } else if (lower == "optiscaler" || lower == "host64") && path.is_dir() {
                     if let Err(e) = fs::remove_dir_all(&path) {
-                        return Err(std::io::Error::new(e.kind(), format!("Failed to remove OptiScaler directory: {}. Is the game running?", e)));
+                        return Err(std::io::Error::new(e.kind(), format!("Failed to remove {} directory: {}. Is the game running?", fname, e)));
                     }
-                    removed.push("OptiScaler/".to_string());
+                    removed.push(format!("{}/", fname));
                 } else if lower == "reshade-shaders" && path.is_dir() {
                     if let Err(e) = fs::remove_dir_all(&path) {
                         return Err(std::io::Error::new(e.kind(), format!("Failed to remove reshade-shaders directory: {}. Is the game running?", e)));
                     }
                     removed.push("reshade-shaders/".to_string());
-                } else if lower == "dxgi.dll" || lower == "winmm.dll" || lower == "d3d12.dll" || lower == "d3d11.dll" || lower == "dinput8.dll" || lower == "version.dll" {
+                } else if lower == "dxgi.dll" || lower == "winmm.dll" || lower == "d3d12.dll" || lower == "d3d11.dll" || lower == "d3d9.dll" || lower == "d3d8.dll" || lower == "dinput8.dll" || lower == "version.dll" {
                     if is_proxy_hook(&path) {
                         match fs::remove_file(&path) {
                             Ok(_) => {

@@ -83,7 +83,7 @@ pub struct AppState {
     pub auto_scan_drives: bool,
     #[serde(default = "default_true", rename = "rustTheme")]
     pub rust_theme: bool,
-    #[serde(default = "default_true", rename = "runInBackground")]
+    #[serde(default = "default_run_in_background", rename = "runInBackground")]
     pub run_in_background: bool,
     #[serde(default, rename = "cachedGames")]
     pub cached_games: Vec<crate::core::scan::GameEntry>,
@@ -101,6 +101,20 @@ pub struct AppState {
     pub custom_overlay_themes: Vec<CustomOverlayTheme>,
     #[serde(default, rename = "customNames")]
     pub custom_names: HashMap<String, String>,
+}
+
+pub fn is_portable_executable() -> bool {
+    if let Ok(exe) = std::env::current_exe() {
+        let name = exe.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        if name.contains("portable") {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn default_run_in_background() -> bool {
+    !is_portable_executable()
 }
 
 fn default_theme() -> String { "dark".to_string() }
@@ -126,7 +140,7 @@ impl Default for AppState {
             group_games_by_store: true,
             auto_scan_drives: false,
             rust_theme: true,
-            run_in_background: true,
+            run_in_background: default_run_in_background(),
             cached_games: Vec::new(),
             addons: default_addons(),
             addon_files: Vec::new(),
@@ -515,6 +529,7 @@ mod tests {
             installed_route: None,
             files: Vec::new(),
             available_exes: Vec::new(),
+            is_laa: true,
         };
         state.cached_games.push(game.clone());
         assert!(!state.is_hidden(&game_dir));

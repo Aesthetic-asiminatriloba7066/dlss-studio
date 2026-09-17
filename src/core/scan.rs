@@ -122,6 +122,8 @@ pub struct GameExeOption {
     pub rel: String,
     pub api: String,
     pub bitness: u32,
+    #[serde(default)]
+    pub is_laa: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -131,6 +133,8 @@ pub struct GameEntry {
     pub exe_path: PathBuf,
     pub exe_rel: String,
     pub bitness: u32,
+    #[serde(default)]
+    pub is_laa: bool,
     pub api: String,
     pub dlss_version: Option<String>,
     pub has_frame_generation: bool,
@@ -153,6 +157,23 @@ pub struct GameEntry {
     pub available_exes: Vec<GameExeOption>,
 }
 
+impl GameEntry {
+    pub fn is_dlss5_patched(&self) -> bool {
+        self.installed_route.is_some() || self.optiscaler_installed || self.reshade_installed
+    }
+
+    pub fn route_display_name(&self) -> &'static str {
+        match self.installed_route.as_deref() {
+            Some("feeder") => "Feeder · Neural Rendering",
+            Some("native") => "Native D3D12",
+            Some("optiscaler") => "OptiScaler",
+            _ if self.optiscaler_installed => "OptiScaler",
+            _ if self.reshade_installed => "ReShade",
+            _ => "Vanilla",
+        }
+    }
+}
+
 pub fn short_version(v: &str) -> String {
     if let Some(stripped) = v.strip_suffix(".0") {
         stripped.to_string()
@@ -162,15 +183,15 @@ pub fn short_version(v: &str) -> String {
 }
 
 static RE_INSTALLER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(unins|setup|install|vcredist|vc_redist|dxsetup|dxwebsetup|oalinst|uninstall|crashreport|crashhandler|easyanticheat|eac|battleye|be_service|launcher|activation|patch|update|dotnetfx|touchup|rapidcrc|autorun|autoplay|quicksfv|readme|config|benchmark|report|helper|service|cleanup|modorganizer|redlauncher|skse\d*_loader|hlds|srcds|steamerrorreporter|dgvoodoocpl|reshade_setup|bg3modmanager|modmanager|vortex|fluffy|fomod)").unwrap()
+    Regex::new(r"(?i)^(unins|setup|install|vcredist|vc_redist|dxsetup|dxwebsetup|oalinst|uninstall|crashreport|crashhandler|unitycrashhandler|unrealcefsubprocess|easyanticheat|eac|battleye|be_service|launcher|activation|patch|update|dotnetfx|touchup|rapidcrc|autorun|autoplay|quicksfv|readme|config|benchmark|report|helper|service|cleanup|modorganizer|redlauncher|skse\d*_loader|hlds |srcds |steamerrorreporter|dgvoodoocpl|dgvoodoo|reshade|optiscaler|dlss5-feed|specialk|skif|bg3modmanager|modmanager|vortex|fluffy|fomod)").unwrap()
 });
 
 static RE_NOT_GAME_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(steamapps|gamesave|gamesaves|workshop|downloading|shadercache|cache|caches|temp|tmp|backup|_dlss5_backup|reshade-shaders|saves?|savegames?|redist|_?commonredist|installers?|setup|dlc|mods?|tools?|node_modules|\.git|bg3modmanager.*|.*modmanager.*|vortex.*|fluffy.*|modorganizer.*|trainers?|cheats?|sdk|patcher)$").unwrap()
+    Regex::new(r"(?i)^(steamapps|gamesave|gamesaves|workshop|downloading|shadercache|cache|caches|temp|tmp|backup|_dlss5_backup|reshade-shaders|host64|optiscaler|saves?|savegames?|redist|_?commonredist|__installer|installers?|setup|dlc|mods?|tools?|node_modules|\.git|bg3modmanager.*|.*modmanager.*|vortex.*|fluffy.*|modorganizer.*|trainers?|cheats?|sdk|patcher)$").unwrap()
 });
 
 static RE_NOT_GAME_TITLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(redistributabl|steamworks common|directx|vcredist|proton|steam linux runtime|soundtrack|modmanager|mod manager|save editor|trainer|cheat engine|nexus mods|sdk)").unwrap()
+    Regex::new(r"(?i)(redistributabl|steamworks common|directx|vcredist|proton|steam linux runtime|soundtrack|modmanager|mod manager|save editor|trainer|cheat engine|nexus mods|sdk )").unwrap()
 });
 
 static RE_CONTAINER: LazyLock<Regex> = LazyLock::new(|| {
@@ -180,6 +201,12 @@ static RE_CONTAINER: LazyLock<Regex> = LazyLock::new(|| {
 pub fn is_installer_or_helper(name: &str) -> bool {
     let lower = name.to_lowercase();
     if lower == "gamelaunchhelper.exe" || lower.starts_with("gamelaunchhelper") 
+        || lower == "dlss5-feed-host64.exe" || lower.starts_with("dlss5-feed") || lower.contains("feed-host")
+        || lower.starts_with("unitycrashhandler") || lower.contains("crashhandler") || lower.contains("crashreport")
+        || lower == "unrealcefsubprocess.exe" || lower.contains("cefsubprocess") || lower.contains("webhelper")
+        || lower.starts_with("dgvoodoo") || lower.starts_with("reshade") || lower.starts_with("optiscaler")
+        || lower.starts_with("specialk") || lower == "skif.exe"
+        || lower.starts_with("easyanticheat") || lower.starts_with("beservice") || lower.starts_with("start_protected_game")
         || lower == "python.exe" || lower == "pythonw.exe" || lower.starts_with("python.") || lower.starts_with("pythonw.")
         || lower == "zsync.exe" || lower == "zsyncmake.exe"
         || lower == "vrwebhelper.exe" || lower.starts_with("cef")
@@ -198,7 +225,7 @@ pub fn is_installer_or_helper(name: &str) -> bool {
         || lower.contains("crash_report") || lower.contains("bugreport") || lower.contains("errorreport")
         || lower.contains("diagnostics") || lower.contains("benchmark")
         || lower.contains("prelauncher")
-        || (lower.contains("launcher") && (lower.contains("pre") || lower.contains("crash") || lower.contains("helper") || lower.contains("bootstrap") || lower.contains("red")))
+        || lower.contains("launcher")
     {
         return true;
     }
@@ -208,7 +235,14 @@ pub fn is_installer_or_helper(name: &str) -> bool {
 pub fn is_helper_or_tool_path(path: &Path) -> bool {
     for comp in path.components() {
         let s = comp.as_os_str().to_string_lossy().to_lowercase();
-        if s == "crashreporter" || s == "crashreports" || s == "tools" || s == "tool" || s == "compiler" || s == "compilers" || s == "sdk" {
+        if s == "host64" || s == "optiscaler" || s == "_dlss5_backup" || s == "reshade-shaders"
+            || s == "crashreporter" || s == "crashreports" || s == "tools" || s == "tool"
+            || s == "compiler" || s == "compilers" || s == "sdk" || s == "sdks"
+            || s == "easyanticheat" || s == "battleye" || s == "anticheat"
+            || s == "__installer" || s == "installer_resources" || s == "installers" || s == "installer"
+            || s == "support" || s == "redist" || s == "_redist" || s == "commonredist" || s == "_commonredist"
+            || s == "prerequisites" || s == "directx"
+            || s == "launcher" || s == "launchers" {
             return true;
         }
     }
@@ -221,9 +255,9 @@ pub fn is_not_a_game_dir(name: &str) -> bool {
     match lower.as_str() {
         "steamapps" | "gamesave" | "gamesaves" | "workshop" | "downloading" 
         | "shadercache" | "cache" | "caches" | "temp" | "tmp" | "backup" 
-        | "_dlss5_backup" | "reshade-shaders" | "save" | "saves" | "savegame" 
+        | "_dlss5_backup" | "reshade-shaders" | "host64" | "optiscaler" | "save" | "saves" | "savegame" 
         | "savegames" | "redist" | "commonredist" | "_commonredist" 
-        | "installer" | "installers" | "setup" | "dlc" | "mods" | "mod" 
+        | "__installer" | "installer" | "installers" | "setup" | "dlc" | "mods" | "mod" 
         | "tools" | "tool" | "node_modules" | ".git" | "sdk" | "patcher" => return true,
         _ => {}
     }
@@ -253,7 +287,7 @@ pub fn holds_game<P: AsRef<Path>>(dir: P, depth: usize) -> bool {
         if path.is_file() {
             if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
                 let lower = fname.to_lowercase();
-                if lower.ends_with(".exe") && !is_installer_or_helper(&lower) {
+                if lower.ends_with(".exe") && !is_helper_or_tool_path(&path) {
                     return true;
                 }
             }
@@ -607,6 +641,7 @@ struct Candidate {
     size: u64,
     depth: usize,
     bitness: u32,
+    is_laa: bool,
     api: String,
     declared: bool,
     has_sibling_dlss: bool,
@@ -616,6 +651,10 @@ struct Candidate {
 fn playable_role_score(name: &str, rel: &str) -> i64 {
     let lower = format!("{} {}", name, rel).to_lowercase();
     let mut score = 0;
+    // Prioritize actual Unreal Engine gameplay shipping binaries over root bootstrap wrappers
+    if lower.contains("shipping.exe") || lower.ends_with("-shipping.exe") || lower.ends_with("_shipping.exe") || lower.contains("win64-shipping") || lower.contains("wingdk-shipping") {
+        score += 15000;
+    }
     if lower.contains("singleplayer") || lower.ends_with("sp.exe") || lower.contains("_sp") {
         score += 400;
     }
@@ -704,6 +743,51 @@ pub fn extract_xbox_metadata(dir: &Path) -> (Option<String>, Option<String>) {
     (resolved_name, resolved_poster)
 }
 
+pub fn is_generic_folder_name(s: &str) -> bool {
+    let lower = s.trim().to_lowercase();
+    matches!(
+        lower.as_str(),
+        "bin" | "x64" | "x86" | "win64" | "win32" | "binaries" | "retail" | "release" | "shipping" | "game" | "client"
+    )
+}
+
+pub fn infer_game_name(dir: &Path, exe_path: &Path, xbox_name: Option<String>) -> String {
+    if let Some(name) = xbox_name {
+        if !name.trim().is_empty() {
+            return name;
+        }
+    }
+
+    let mut candidate_dir = dir;
+    let mut resolved_name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+    while is_generic_folder_name(&resolved_name) {
+        if let Some(parent) = candidate_dir.parent() {
+            if let Some(p_name) = parent.file_name() {
+                resolved_name = p_name.to_string_lossy().to_string();
+                candidate_dir = parent;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if is_generic_folder_name(&resolved_name) || resolved_name.trim().is_empty() {
+        let exe_stem = exe_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        if !exe_stem.is_empty() {
+            return exe_stem;
+        }
+    }
+
+    if resolved_name.trim().is_empty() {
+        "Unknown Game".to_string()
+    } else {
+        resolved_name
+    }
+}
+
 pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
     let dir = dir.as_ref();
     if !dir.exists() || !dir.is_dir() {
@@ -723,12 +807,13 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
     let mut candidates: Vec<Candidate> = Vec::new();
 
     let skip_dirs = [
-        "_dlss5_backup", "reshade-shaders", "optiscaler", "paks", "movies", "saves", "logs",
+        "_dlss5_backup", "reshade-shaders", "optiscaler", "host64", "paks", "movies", "saves", "logs",
         "node_modules", ".git", "data", "audio", "sound", "sounds", "music",
         "textures", "cinematics", "localization", "streamingassets", "shaders",
-        "installer_resources", "installers", "installer", "support", "redist", "_redist", "prerequisites",
+        "__installer", "installer_resources", "installers", "installer", "support", "redist", "_redist", "commonredist", "_commonredist", "prerequisites",
         "cache", "caches", "shadercache", "soundbanks", "soundbank", "video", "videos", "datas", "fonts", "font",
-        "renpy", "crashreporter", "crashreports", "tools", "tool", "compiler", "compilers"
+        "renpy", "crashreporter", "crashreports", "tools", "tool", "compiler", "compilers", "easyanticheat", "battleye",
+        "launcher", "launchers"
     ];
 
     for entry in WalkDir::new(dir)
@@ -805,6 +890,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| entry.file_name().to_string_lossy().to_string());
 
+                let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
                 candidates.push(Candidate {
                     path: path.to_path_buf(),
                     rel,
@@ -812,6 +898,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                     size,
                     depth,
                     bitness,
+                    is_laa,
                     api,
                     declared: is_declared,
                     has_sibling_dlss,
@@ -866,6 +953,9 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
             let api = sibling_api.unwrap_or_else(|| "DirectX 11".to_string());
             let is_dx12 = api == "DirectX 12";
 
+            let pe_d = crate::core::pe::inspect_pe(&d.path);
+            let is_laa = pe_d.as_ref().map(|p| p.is_laa).unwrap_or(d.bitness == 64);
+
             candidates.push(Candidate {
                 path: d.path.clone(),
                 rel: d.rel.clone(),
@@ -873,6 +963,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                 size,
                 depth: d.rel.split(['/', '\\']).count().saturating_sub(1),
                 bitness: d.bitness,
+                is_laa,
                 api,
                 declared: true,
                 has_sibling_dlss,
@@ -883,6 +974,20 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
 
     if candidates.is_empty() {
         return None;
+    }
+
+    // If an Unreal Engine shipping binary exists in subdirectories (*-Shipping.exe),
+    // filter out root-level dummy bootstrap wrappers (depth <= 1).
+    let has_shipping_exe = candidates.iter().any(|c| {
+        let l = c.name.to_lowercase();
+        l.contains("shipping.exe") || l.ends_with("-shipping.exe") || l.ends_with("_shipping.exe")
+    });
+    if has_shipping_exe {
+        candidates.retain(|c| {
+            let l = c.name.to_lowercase();
+            let is_shipping = l.contains("shipping.exe") || l.ends_with("-shipping.exe") || l.ends_with("_shipping.exe");
+            is_shipping || c.depth > 1
+        });
     }
 
     let dir_name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
@@ -901,6 +1006,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         rel: c.rel.clone(),
         api: c.api.clone(),
         bitness: c.bitness,
+        is_laa: c.is_laa,
     }).collect();
 
     let chosen = candidates.remove(0);
@@ -1009,8 +1115,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         || dir.join("appxmanifest.xml").exists()
         || dir.to_string_lossy().to_lowercase().contains("xboxgames")
         || dir.to_string_lossy().to_lowercase().contains("windowsapps");
-
-    let name = xbox_name.unwrap_or_else(|| dir.file_name().unwrap_or_default().to_string_lossy().to_string());
+    let name = infer_game_name(dir, &chosen.path, xbox_name);
 
     crate::core::logger::debug("scan", &format!(
         "Game scanned '{}': exe={}, bitness={}-bit, api={}, dlss={:?}, fg={}, optiscaler={}, backup={}",
@@ -1065,6 +1170,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         exe_path: chosen.path,
         exe_rel: chosen.rel,
         bitness: chosen.bitness,
+        is_laa: chosen.is_laa,
         api,
         dlss_version,
         has_frame_generation: has_fg,
@@ -1102,6 +1208,7 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
         } else {
             None
         };
+        let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
         let api = detected_api.unwrap_or_else(|| "DirectX 11".to_string());
         exes.push(GameExeOption {
             name: d.name.clone(),
@@ -1109,16 +1216,18 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
             rel: d.rel.clone(),
             api,
             bitness,
+            is_laa,
         });
     }
 
     let skip_dirs = [
-        "_dlss5_backup", "reshade-shaders", "optiscaler", "paks", "movies", "saves", "logs",
+        "_dlss5_backup", "reshade-shaders", "optiscaler", "host64", "paks", "movies", "saves", "logs",
         "node_modules", ".git", "data", "audio", "sound", "sounds", "music",
         "textures", "cinematics", "localization", "streamingassets", "shaders",
-        "installer_resources", "installers", "installer", "support", "redist", "_redist", "prerequisites",
+        "__installer", "installer_resources", "installers", "installer", "support", "redist", "_redist", "commonredist", "_commonredist", "prerequisites",
         "cache", "caches", "shadercache", "soundbanks", "soundbank", "video", "videos", "datas", "fonts", "font",
-        "renpy", "crashreporter", "crashreports", "tools", "tool", "compiler", "compilers"
+        "renpy", "crashreporter", "crashreports", "tools", "tool", "compiler", "compilers", "easyanticheat", "battleye",
+        "launcher", "launchers"
     ];
 
     for entry in WalkDir::new(dir)
@@ -1143,6 +1252,7 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
                 }
                 let pe_opt = inspect_pe(path);
                 let bitness = pe_opt.as_ref().map(|p| p.bitness).unwrap_or(64);
+                let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
                 let detected_api = if let Some(ref pe) = pe_opt {
                     detect_api(path, &pe.imports)
                 } else if let Some(api) = detect_api(path, &[]) {
@@ -1163,12 +1273,31 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
                     rel,
                     api,
                     bitness,
+                    is_laa,
                 });
             }
         }
     }
+
+    // If an Unreal Engine shipping binary exists in subdirectories (*-Shipping.exe),
+    // filter out root-level dummy bootstrap wrappers (depth <= 1).
+    let has_shipping_exe = exes.iter().any(|e| {
+        let l = e.name.to_lowercase();
+        l.contains("shipping.exe") || l.ends_with("-shipping.exe") || l.ends_with("_shipping.exe")
+    });
+    if has_shipping_exe {
+        exes.retain(|e| {
+            let l = e.name.to_lowercase();
+            let is_shipping = l.contains("shipping.exe") || l.ends_with("-shipping.exe") || l.ends_with("_shipping.exe");
+            let depth = e.rel.matches(['/', '\\']).count();
+            is_shipping || depth > 1
+        });
+    }
+
     let dir_name: String = dir.file_name().unwrap_or_default().to_string_lossy().chars().filter(|ch| ch.is_alphanumeric()).flat_map(|ch| ch.to_lowercase()).collect();
     exes.sort_by(|a, b| {
+        let a_is_shipping = a.name.to_lowercase().contains("shipping.exe");
+        let b_is_shipping = b.name.to_lowercase().contains("shipping.exe");
         let a_decl_pos = declared.iter().position(|d| d.path == a.path).unwrap_or(usize::MAX);
         let b_decl_pos = declared.iter().position(|d| d.path == b.path).unwrap_or(usize::MAX);
         let a_is_32 = a.name.to_lowercase().contains("-32") || a.name.to_lowercase().contains("_32") || a.name.to_lowercase().contains("32bit");
@@ -1178,7 +1307,8 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
         let a_match = !dir_name.is_empty() && (a_norm.starts_with(&dir_name) || dir_name.starts_with(&a_norm));
         let b_match = !dir_name.is_empty() && (b_norm.starts_with(&dir_name) || dir_name.starts_with(&b_norm));
 
-        a_decl_pos.cmp(&b_decl_pos)
+        (b_is_shipping as u8).cmp(&(a_is_shipping as u8))
+            .then_with(|| a_decl_pos.cmp(&b_decl_pos))
             .then_with(|| (a_is_32 as u8).cmp(&(b_is_32 as u8)))
             .then_with(|| (b_match as u8).cmp(&(a_match as u8)))
             .then_with(|| a.rel.matches(['/', '\\']).count().cmp(&b.rel.matches(['/', '\\']).count()))
@@ -1255,20 +1385,24 @@ pub fn discover_steam() -> Vec<GameEntry> {
         return games;
     };
 
+    let norm_root = crate::core::state::normalize_path_str(&steam_root);
     let mut libraries = vec![PathBuf::from(&steam_root)];
+    let mut seen_libs = std::collections::HashSet::new();
+    seen_libs.insert(norm_root);
 
     let vdf_path = PathBuf::from(&steam_root).join("steamapps").join("libraryfolders.vdf");
     if let Ok(vdf_content) = fs::read_to_string(&vdf_path) {
         let re = Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
         for cap in re.captures_iter(&vdf_content) {
             let lib = cap[1].replace(r"\\", r"\");
-            let p = PathBuf::from(lib);
-            if !libraries.contains(&p) {
-                libraries.push(p);
+            let norm_lib = crate::core::state::normalize_path_str(&lib);
+            if seen_libs.insert(norm_lib) {
+                libraries.push(PathBuf::from(lib));
             }
         }
     }
 
+    let mut seen_dirs = std::collections::HashSet::new();
     for lib in libraries {
         let apps_dir = lib.join("steamapps");
         let Ok(entries) = fs::read_dir(&apps_dir) else { continue; };
@@ -1287,6 +1421,10 @@ pub fn discover_steam() -> Vec<GameEntry> {
                             }
                         }
                         let game_dir = apps_dir.join("common").join(&idir);
+                        let norm = crate::core::state::normalize_game_path(&game_dir);
+                        if !seen_dirs.insert(norm) {
+                            continue;
+                        }
                         if game_dir.exists() {
                             if let Some(mut game) = scan_game_directory(&game_dir) {
                                 game.launcher = "Steam".to_string();
@@ -1313,9 +1451,14 @@ pub fn discover_gog() -> Vec<GameEntry> {
     #[cfg(windows)]
     {
         let subkeys = win32_enum_subkeys(HKEY_LOCAL_MACHINE, r"SOFTWARE\GOG.com\Games", KEY_READ | KEY_WOW64_32KEY);
+        let mut seen_paths = std::collections::HashSet::new();
         for game_id in subkeys {
             let subkey_path = format!(r"SOFTWARE\GOG.com\Games\{}", game_id);
             if let Some(path_str) = win32_read_reg_string(HKEY_LOCAL_MACHINE, &subkey_path, "path", KEY_READ | KEY_WOW64_32KEY) {
+                let norm = crate::core::state::normalize_path_str(&path_str);
+                if !seen_paths.insert(norm) {
+                    continue;
+                }
                 let gdir = PathBuf::from(path_str.trim());
                 if gdir.exists() {
                     if let Some(mut game) = scan_game_directory(&gdir) {
@@ -1332,6 +1475,7 @@ pub fn discover_gog() -> Vec<GameEntry> {
 pub fn discover_epic() -> Vec<GameEntry> {
     let mut games = Vec::new();
     let manifests = PathBuf::from(r"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests");
+    let mut seen_paths = std::collections::HashSet::new();
     if let Ok(entries) = fs::read_dir(&manifests) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1339,6 +1483,10 @@ pub fn discover_epic() -> Vec<GameEntry> {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(loc) = val.get("InstallLocation").and_then(|v| v.as_str()) {
+                            let norm = crate::core::state::normalize_path_str(loc);
+                            if !seen_paths.insert(norm) {
+                                continue;
+                            }
                             let gdir = PathBuf::from(loc);
                             if gdir.exists() {
                                 if let Some(mut game) = scan_game_directory(&gdir) {
@@ -1443,15 +1591,36 @@ pub fn discover_all_launchers() -> Vec<GameEntry> {
 }
 
 pub fn get_fixed_drives() -> Vec<PathBuf> {
-    let mut drives = Vec::new();
-    for c in b'C'..=b'Z' {
-        let root_str = format!("{}:\\", c as char);
-        let root_path = PathBuf::from(&root_str);
-        if root_path.exists() {
-            drives.push(root_path);
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetLogicalDrives() -> u32;
+            fn GetDriveTypeW(lpRootPathName: *const u16) -> u32;
         }
+
+        const DRIVE_FIXED: u32 = 3;
+        let mut drives = Vec::new();
+        let mask = unsafe { GetLogicalDrives() };
+
+        for i in 2..26 { // Start at C (index 2: 'C' - 'A')
+            if (mask & (1 << i)) != 0 {
+                let letter = (b'A' + i as u8) as char;
+                let root_str = format!("{}:\\", letter);
+                let wide: Vec<u16> = root_str.encode_utf16().chain(std::iter::once(0)).collect();
+                let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
+                if drive_type == DRIVE_FIXED {
+                    drives.push(PathBuf::from(root_str));
+                }
+            }
+        }
+        drives
     }
-    drives
+
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/")]
+    }
 }
 
 pub fn is_inside<P1: AsRef<Path>, P2: AsRef<Path>>(file: P1, root: P2) -> bool {
@@ -1621,6 +1790,7 @@ mod tests {
                 poster: None,
                 files: Vec::new(),
                 available_exes: Vec::new(),
+                is_laa: true,
             };
             assert!(!crate::core::install_routes::is_native_dlss_supported(&fake_bg3), "Vulkan game must NOT support Native DLSS (RenoDX)");
             assert!(fake_bg3.can_inject_fg, "BG3 Vulkan must support frame generation injection");
@@ -1768,6 +1938,58 @@ mod tests {
 
         let game = scan_game_directory(&temp_dir).expect("Must scan game directory");
         assert_eq!(game.exe_path.file_name().unwrap(), "Cyberpunk2077.exe");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_discover_game_exes_filters_larilauncher_and_launcher_dirs() {
+        let temp_dir = std::env::temp_dir().join(format!("test_bg3_filter_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let bin_dir = temp_dir.join("bin");
+        let launcher_dir = temp_dir.join("Launcher");
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::create_dir_all(&launcher_dir).unwrap();
+
+        // Write real executables in bin/
+        let mut dx11_exe = vec![0u8; 8000];
+        dx11_exe[50..67].copy_from_slice(b"D3D11CreateDevice");
+        fs::write(bin_dir.join("bg3_dx11.exe"), dx11_exe).unwrap();
+        fs::write(bin_dir.join("bg3.exe"), b"vulkan executable dummy").unwrap();
+        fs::write(bin_dir.join("vulkan-1.dll"), b"vulkan").unwrap();
+
+        // Write LariLauncher in Launcher/
+        fs::write(launcher_dir.join("LariLauncher.exe"), b"larian launcher dummy").unwrap();
+
+        let exes = discover_game_exes(&temp_dir);
+        assert_eq!(exes.len(), 2, "Must discover ONLY bg3.exe and bg3_dx11.exe, rejecting LariLauncher.exe");
+        assert!(!exes.iter().any(|e| e.name.to_lowercase().contains("launcher")));
+        assert!(exes.iter().any(|e| e.name == "bg3.exe"));
+        assert!(exes.iter().any(|e| e.name == "bg3_dx11.exe"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_discover_game_exes_filters_unreal_root_stub_when_shipping_binary_exists() {
+        let temp_dir = std::env::temp_dir().join(format!("test_ue_shipping_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let binaries_wingdk = temp_dir.join("Mixtape").join("Binaries").join("WinGDK");
+        fs::create_dir_all(&binaries_wingdk).unwrap();
+
+        // Write root dummy wrapper
+        fs::write(temp_dir.join("Mixtape.exe"), b"root bootstrap stub").unwrap();
+
+        // Write shipping binary
+        let mut shipping_exe = vec![0u8; 8000];
+        shipping_exe[50..67].copy_from_slice(b"D3D11CreateDevice");
+        fs::write(binaries_wingdk.join("Mixtape-WinGDK-Shipping.exe"), shipping_exe).unwrap();
+        fs::write(binaries_wingdk.join("d3d11.dll"), b"d3d11").unwrap();
+
+        let exes = discover_game_exes(&temp_dir);
+        assert_eq!(exes.len(), 1, "Must filter root Mixtape.exe stub and return ONLY Mixtape-WinGDK-Shipping.exe");
+        assert_eq!(exes[0].name, "Mixtape-WinGDK-Shipping.exe");
+
+        let game = scan_game_directory(&temp_dir).expect("Must scan game directory");
+        assert_eq!(game.exe_path.file_name().unwrap(), "Mixtape-WinGDK-Shipping.exe");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1954,6 +2176,94 @@ mod tests {
         assert_eq!(api_gl2, Some("OpenGL".to_string()));
 
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_get_fixed_drives_non_empty() {
+        let drives = get_fixed_drives();
+        assert!(!drives.is_empty(), "Should discover at least one fixed drive on Windows");
+        assert!(drives.iter().any(|d| d.to_string_lossy().to_uppercase().starts_with("C:")));
+    }
+
+    #[test]
+    fn test_discover_game_exes_filters_dlss5_feed_host64_and_mod_directories() {
+        let temp_dir = std::env::temp_dir().join(format!("test_filter_host64_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let host64_dir = temp_dir.join("host64");
+        let installer_dir = temp_dir.join("__installer");
+        fs::create_dir_all(&host64_dir).unwrap();
+        fs::create_dir_all(&installer_dir).unwrap();
+
+        // Write real game exe
+        let mut game_exe = vec![0u8; 8000];
+        game_exe[50..67].copy_from_slice(b"D3D11CreateDevice");
+        fs::write(temp_dir.join("Dead Space.exe"), game_exe).unwrap();
+
+        // Write non-game executables
+        fs::write(host64_dir.join("dlss5-feed-host64.exe"), b"feeder helper binary").unwrap();
+        fs::write(temp_dir.join("dlss5-feed-host64.exe"), b"root feeder helper binary").unwrap();
+        fs::write(installer_dir.join("Touchup.exe"), b"installer tool").unwrap();
+
+        let exes = discover_game_exes(&temp_dir);
+        assert_eq!(exes.len(), 1, "Must only return Dead Space.exe, strictly filtering host64, installer, and dlss5-feed-host64");
+        assert_eq!(exes[0].name, "Dead Space.exe");
+
+        let game = scan_game_directory(&temp_dir).expect("Must scan game directory");
+        assert_eq!(game.exe_path.file_name().unwrap(), "Dead Space.exe");
+        assert_eq!(game.available_exes.len(), 1);
+        assert_eq!(game.available_exes[0].name, "Dead Space.exe");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_game_entry_dlss5_patched_and_route_display() {
+        let mut entry = GameEntry::default();
+        assert!(!entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "Vanilla");
+
+        entry.installed_route = Some("feeder".to_string());
+        assert!(entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "Feeder · Neural Rendering");
+
+        entry.installed_route = Some("native".to_string());
+        assert!(entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "Native D3D12");
+
+        entry.installed_route = Some("optiscaler".to_string());
+        assert!(entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "OptiScaler");
+
+        entry.installed_route = None;
+        entry.optiscaler_installed = true;
+        assert!(entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "OptiScaler");
+
+        entry.optiscaler_installed = false;
+        entry.reshade_installed = true;
+        assert!(entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "ReShade");
+
+        entry.reshade_installed = false;
+        assert!(!entry.is_dlss5_patched());
+        assert_eq!(entry.route_display_name(), "Vanilla");
+    }
+
+    #[test]
+    fn test_infer_game_name_nested_generic_folder() {
+        let p = Path::new(r"C:\Games\Cyberpunk 2077\bin\x64");
+        let exe = Path::new(r"C:\Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe");
+        let name = infer_game_name(p, exe, None);
+        assert_eq!(name, "Cyberpunk 2077");
+
+        let p_root = Path::new(r"D:\SteamLibrary\steamapps\common\Baldurs Gate 3");
+        let exe_bg3 = Path::new(r"D:\SteamLibrary\steamapps\common\Baldurs Gate 3\bin\bg3.exe");
+        let name_bg3 = infer_game_name(p_root, exe_bg3, None);
+        assert_eq!(name_bg3, "Baldurs Gate 3");
+
+        let p_generic = Path::new(r"C:\Random\shipping");
+        let exe_stub = Path::new(r"C:\Random\shipping\Starfield.exe");
+        let name_stem = infer_game_name(p_generic, exe_stub, None);
+        assert_eq!(name_stem, "Random");
     }
 }
 
