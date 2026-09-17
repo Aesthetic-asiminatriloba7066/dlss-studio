@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.4] - 2026-09-17
+## [1.0.5] - 2026-09-17
  
 ### Fixed
 - **Dedicated Interactive Uninstaller & Clean Directory Purge**: Added dedicated `UninstallApp` UI with confirmation screen, live progress bar, and completion screen. Implemented temp trampoline worker pattern in `%TEMP%` to cleanly delete the entire installation folder without Windows file locks. Checkbox to clear `%APPDATA%\dlss-5-studio` defaults to checked (game backups in game folders remain untouched).

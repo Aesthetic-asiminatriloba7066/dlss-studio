@@ -1,4 +1,4 @@
-# DLSS 5 Studio v1.0.4 ⚡
+# DLSS 5 Studio v1.0.5 ⚡
 
 > **Graphics API detection accuracy enhancements, non-game configuration and utility filtering, Relic modular rendering engine support, and true "Undetected" fallback labeling.**
 
@@ -31,8 +31,8 @@
 
 | File | Type | Description |
 | :--- | :--- | :--- |
-| **`dlss-studio-v1.0.4-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
-| **`dlss-studio-v1.0.4-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
+| **`dlss-studio-v1.0.5-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
+| **`dlss-studio-v1.0.5-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
 
 ---
 
