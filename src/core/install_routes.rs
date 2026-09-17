@@ -207,6 +207,7 @@ mod tests {
             installed_route: None,
             files: Vec::new(),
             available_exes: Vec::new(),
+            is_laa: false,
         }
     }
 

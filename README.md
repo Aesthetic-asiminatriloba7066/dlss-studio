@@ -1,10 +1,10 @@
-# DLSS 5 STUDIO ⚡ v1.0
+# DLSS 5 STUDIO ⚡ v1.0.2
 
 > **A blisteringly fast, low-memory utility built in pure native Rust to enable and unlock DLSS, Neural Reconstruction, and 4x Frame Generation across your PC games while preserving pristine graphical fidelity.**
 >
 > _Supports all **GeForce RTX GPUs (20, 30, and 40-Series)** for DLSS upscaling and OptiScaler Pre-SR, with **exclusive 4x Multi-Frame Generation unlocking for RTX 40-Series cards**._
 
-[![Version](https://img.shields.io/badge/version-1.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/version-1.0.2-orange.svg)](#)
 [![Platform](<https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20(64--bit)-blue.svg>)](#)
 [![Language](https://img.shields.io/badge/language-100%25%20Pure%20Rust-red.svg)](#)
 [![i18n](https://img.shields.io/badge/i18n-14%20Languages-yellow.svg)](#)
@@ -48,7 +48,7 @@ Built with [Dioxus](https://dioxuslabs.com/) and direct Win32 APIs, it eliminate
 
 - **ReShade Backend**:
   - **`Native DLSS (RenoDX)`**: For DirectX 12 games with native DLSS pipelines. Hooks into D3D12 NGX vtables and enables 4x MFG unlock.
-  - **`DLSS 5 Feeder`**: Dedicated frame interception route for non-DLSS titles or games running on DirectX 11, Vulkan, OpenGL, or wrapper runtimes (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `vort_Motion.fx`).
+  - **`DLSS 5 Feeder`**: Dedicated frame interception route for non-DLSS titles or games running on DirectX 11, Vulkan, OpenGL, or legacy pre-DirectX 10 APIs (DirectX 8 and DirectX 9 via automated dgVoodoo 2 translation with 32-bit LAA memory support) (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `vort_Motion.fx`).
 - **OptiScaler Backend**:
   - **`OptiScaler DLSS-NR`**: Full neural reconstruction with Pre-SR multipass. Automatically restricted on titles lacking native depth and motion vectors.
 - **Seamless Cross-Route Hot-Swapping**: Switch freely between ReShade (Native/Feeder) and OptiScaler with a single click. DLSS 5 STUDIO automatically unregisters Vulkan implicit layers, removes conflicting proxy DLLs, and deploys the new payload while carrying forward the original vanilla game backups.
@@ -61,7 +61,7 @@ Scans and organizes your games automatically without manual configuration:
 - **Xbox Game Pass / Microsoft Store**: Queries `GamingServices` package repository and scans `XboxGames` drive roots. Parses GDK `MicrosoftGame.config` and `AppxManifest.xml` to bypass launcher wrappers (`gamelaunchhelper.exe`), resolves authentic 64-bit executables, and extracts high-resolution logos directly from package assets.
 - **Epic Games Store**: Discovers installed titles by parsing `%PROGRAMDATA%\Epic\...\Manifests\*.item` manifests.
 - **GOG Galaxy**: Inspects `GOG.com\Games` registry trees and `goggame-*.info` playtasks.
-- **Custom Folders & Manual Executables**: Add any custom game folder or executable with custom title renaming and persistent artwork caching.
+- **Custom Folders & Manual Executables**: Add any custom game folder or executable with instant automatic Steam CDN box art resolution, smart nested directory climbing (e.g. `bin/x64` auto-resolving to the authentic parent title), fuzzy title boundary splitting, on-demand artwork refresh, and persistent caching.
 
 ### 5. 🛡️ Bulletproof Backup, Rollback & Process Safety
 
@@ -106,11 +106,12 @@ Scans and organizes your games automatically without manual configuration:
 
 ### Standalone Setup / Installer (Recommended)
 
-- Run **`dlss-studio-setup.exe`** or install via **`dlss-studio.msi`** for standard Windows installation with Start Menu and Desktop shortcuts.
+- Run **`dlss-studio-v<version>-setup.exe`** for standard Windows installation with Start Menu and Desktop shortcuts.
+- **Seamless In-Place Updates**: Automatically detects previous installations, displaying an **"Update"** flow that safely terminates running application instances before copying files, while preserving all user libraries, settings, and custom folders.
 
 ### Portable Executable
 
-1. Download **`dlss-studio-portable.exe`** from the [Releases](https://github.com/bookamp/dlss-studio/releases) page.
+1. Download **`dlss-studio-v<version>-portable.exe`** from the [Releases](https://github.com/bookamp/dlss-studio/releases) page.
 2. Run from anywhere—no installation required.
 
 ---
@@ -136,12 +137,18 @@ Scans and organizes your games automatically without manual configuration:
 
 ---
 
-## 📚 Acknowledgements
+## 📚 Acknowledgements & Third-Party Components
 
-- **DLSS 5 Swapper**: Original UI layout and desktop concept ([rakanki911/DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper)).
-- **Frame Generation & HDR Mods**: Integrates runtime hooks developed by **Otis_Inf** and the **RenoDX** / **RTX40MFG-Unlock** project teams.
-- **OptiScaler DLSS-NR & Pre-SR**: Specialized neural reconstruction & multi-pass wrapper developed by **wilsjo2** ([OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass)), based on upstream [OptiScaler](https://github.com/cdozdil/OptiScaler) by **cdozdil**.
-- **Rust Ecosystem**: Built using [Dioxus](https://dioxuslabs.com/), [mimalloc](https://github.com/microsoft/mimalloc), [pelite](https://github.com/CasualX/pelite), and native Win32 APIs.
+- **DLSS 5 Swapper**: Original UI layout, visual design, and desktop concept ([rakanki911/DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper)).
+- **dgVoodoo 2**: Legacy DirectX 1–9 to Direct3D 11/12 graphics wrapper by **Dege** ([dege-diosg/dgVoodoo2](https://github.com/dege-diosg/dgVoodoo2)).
+- **DLSS 5 Feeder**: Universal ReShade frame interception pipeline for non-DLSS and non-DX12 titles by **jlrouzies-fr** ([jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)).
+- **MFGAdaUnlock-RenoDx**: Streamline Frame Generation 4x unlocker add-on for GeForce RTX 40-Series GPUs by **mavismmg** ([mavismmg/MFGAdaUnlock-RenoDx](https://github.com/mavismmg/MFGAdaUnlock-RenoDx)).
+- **vort_Shaders & vort_Motion**: Temporal optical flow and motion vector calculation shaders by **vortigern11** ([vortigern11/vort_Shaders](https://github.com/vortigern11/vort_Shaders)).
+- **OptiScaler DLSS-NR & Pre-SR**: Specialized neural reconstruction & multi-pass wrapper developed by **wilsjo2** ([OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass)), based on upstream [OptiScaler](https://github.com/optiscaler/OptiScaler) by **cdozdil** (Nitec).
+- **RenoDX & Frame Generation Mods**: HDR pipeline, Streamline contract hooking, and frame interception runtimes developed by **Otis_Inf**, **ShortFuse**, and the **RenoDX** project team.
+- **ReShade**: Advanced generic post-processing injector, swapchain hook, and native C++ Add-on framework by **crosire** ([crosire/reshade](https://github.com/crosire/reshade) and [crosire/reshade-shaders](https://github.com/crosire/reshade-shaders)).
+- **NVIDIA Streamline**: Cross-vendor open-source interposer framework for DLSS and Frame Generation ([NVIDIA/Streamline](https://github.com/NVIDIA/Streamline)).
+- **Rust Ecosystem**: Built using [Dioxus](https://dioxuslabs.com/), [mimalloc](https://github.com/microsoft/mimalloc), [pelite](https://github.com/CasualX/pelite), [winres](https://github.com/mxre/winres), and native Win32 APIs.
 
 ---
 

@@ -3,8 +3,8 @@ use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
-pub const FEEDER_ARCHIVE_URL: &str = "https://github.com/jlrouzies-fr/DLSS5-Feeder/releases/download/v1.16.0-beta.1/DLSS5-Feeder-1.16.0-beta.1.zip";
-pub const FEEDER_ARCHIVE_SHA256: &str = "22ae8227b11834529e4980cb66ba4b3f277c399020d116c840481c18b12844d3";
+pub const FEEDER_ARCHIVE_URL: &str = "https://github.com/jlrouzies-fr/DLSS5-Feeder/releases/download/v1.16.0-beta.3/DLSS5-Feeder-1.16.0-beta.3.zip";
+pub const FEEDER_ARCHIVE_SHA256: &str = "0d1deebf531436a6d0914548e450a790aefa53cb4e9f6dfdcd48aff74831cb21";
 
 pub const VORT_ARCHIVE_URL: &str = "https://codeload.github.com/vortigern11/vort_Shaders/zip/b410b9f0c0fbb83c8cb42164aaf1655fab386f4a";
 pub const VORT_ARCHIVE_SHA256: &str = "231ba34a75556f9943e359559a89b0d0cc2caa322d9dcdee5630061bf9fe13b6";
@@ -15,17 +15,32 @@ pub const RESHADE_FXH_SHA256: &str = "6dabfbbaf968c3871905d2ea17f96572ff7b1cec01
 pub const RESHADE_UI_FXH_URL: &str = "https://raw.githubusercontent.com/crosire/reshade-shaders/slim/Shaders/ReShadeUI.fxh";
 pub const RESHADE_UI_FXH_SHA256: &str = "78adf672df47460297eb9fe6dd238d2aafa24510b52b84feb1a745dff70eb901";
 
-pub const MFG_09_URL: &str = "https://github.com/mavismmg/MFGAdaUnlock-RenoDx/releases/download/0.9/renodx-mfgunlock.addon64";
-pub const MFG_09_SHA256: &str = "64184bb370f223c3cabb359010a9a64e114cdae6b62d8b014a731a602af0a0da";
+pub const MFG_10_URL: &str = "https://github.com/mavismmg/MFGAdaUnlock-RenoDx/releases/download/1.0/renodx-mfgunlock.addon64";
+pub const MFG_10_SHA256: &str = "f9f10c685e3e89077f751df2394a1629615a56b58d111dff26b39894e772d50e";
+pub const MFG_09_URL: &str = MFG_10_URL;
+pub const MFG_09_SHA256: &str = MFG_10_SHA256;
 
-pub const OPTISCALER_083_URL: &str = "https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/download/v0.8.3/OptiScaler-NR-v0.8.3.zip";
-pub const OPTISCALER_083_SHA256: &str = "3f2d26fb136d964a394bf50896d082156173153a2a55b88e1995277b4dabe3c8";
+pub const OPTISCALER_084_URL: &str = "https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/download/v0.8.4/OptiScaler-NR-v0.8.4.zip";
+pub const OPTISCALER_084_SHA256: &str = "8789912859882e66b3f3a1aa768db947da779dfd65225df69ea919052e73a2e4";
+pub const OPTISCALER_083_URL: &str = OPTISCALER_084_URL;
+pub const OPTISCALER_083_SHA256: &str = OPTISCALER_084_SHA256;
 
 pub const RENODX_DLSS5_URL: &str = "https://github.com/yumlevi/renodx-dlss-installer/releases/download/latest/renodx-dlss5.addon64";
 pub const STREAMLINE_ZIP_URL: &str = "https://github.com/yumlevi/renodx-dlss-installer/releases/download/latest/streamline.zip";
 pub const RESHADE_SETUP_URL: &str = "https://reshade.me/downloads/ReShade_Setup_6.8.0_Addon.exe";
 pub const RESHADE_SETUP_SHA256: &str = "afe4c8f13048306307983b8b3d41d5bf00a86820440b0e57dea10950e1176445";
 pub const RESHADE64_SHA256: &str = "0cee63f9c9f13f3ac909c5b4903f4dbb4b719a7ab3b4f13b0deaf83c814b94f7";
+
+pub const DGVOODOO_URL: &str = "https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.5/dgVoodoo2_87_5.zip";
+pub const DGVOODOO_SHA256: &str = "5ffde6927f7355ca3fdd5d785b581256a8e6539fa13e395a891ade6ba1040850";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DgVoodooComponents {
+    pub d3d9_x86: PathBuf,
+    pub d3d9_x64: PathBuf,
+    pub d3d8_x86: Option<PathBuf>,
+    pub conf: PathBuf,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeederComponents {
@@ -321,6 +336,159 @@ pub fn extract_zip<R: Read + Seek>(reader: R, out_dir: &Path) -> Result<(), Stri
     Ok(())
 }
 
+/// Checks whether dgVoodoo2 is cached on disk
+pub fn is_dgvoodoo_cached() -> bool {
+    find_local_dgvoodoo_components().is_some()
+}
+
+/// Discovers local dgVoodoo2 components on disk
+pub fn find_local_dgvoodoo_components() -> Option<DgVoodooComponents> {
+    let mut search_dirs = Vec::new();
+    search_dirs.push(get_components_root());
+    if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+        search_dirs.push(PathBuf::from(&local_appdata).join("dlss-5-studio").join("components"));
+        search_dirs.push(PathBuf::from(&local_appdata).join("DLSS-Studio").join("components"));
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        search_dirs.push(PathBuf::from(&appdata).join("dlss-5-studio").join("components"));
+        search_dirs.push(PathBuf::from(&appdata).join("DLSS-Studio").join("components"));
+    }
+    if let Ok(pd) = std::env::var("ProgramData") {
+        search_dirs.push(PathBuf::from(&pd).join("dlss-5-studio").join("components"));
+    }
+    search_dirs.push(PathBuf::from(r"C:\DLSS 5 Studio\data\components"));
+    search_dirs.push(PathBuf::from(r"C:\DLSS 5 Studio\components"));
+    if let Ok(exe_p) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_p.parent() {
+            search_dirs.push(exe_dir.join("components"));
+            search_dirs.push(exe_dir.join("components").join("dgvoodoo"));
+            search_dirs.push(exe_dir.join("data").join("components"));
+            if let Some(parent) = exe_dir.parent() {
+                search_dirs.push(parent.join("components"));
+                search_dirs.push(parent.join("data").join("components"));
+            }
+        }
+    }
+
+    for dir in search_dirs {
+        let dg = if dir.join("dgvoodoo").is_dir() {
+            dir.join("dgvoodoo")
+        } else {
+            dir
+        };
+
+        let d3d9_x86 = if dg.join("x86").join("D3D9.dll").is_file() {
+            dg.join("x86").join("D3D9.dll")
+        } else if dg.join("D3D9.dll").is_file() {
+            dg.join("D3D9.dll")
+        } else {
+            continue;
+        };
+
+        let d3d9_x64 = if dg.join("x64").join("D3D9.dll").is_file() {
+            dg.join("x64").join("D3D9.dll")
+        } else if dg.join("D3D9_x64.dll").is_file() {
+            dg.join("D3D9_x64.dll")
+        } else {
+            d3d9_x86.clone()
+        };
+
+        let d3d8_x86 = if dg.join("x86").join("D3D8.dll").is_file() {
+            Some(dg.join("x86").join("D3D8.dll"))
+        } else if dg.join("D3D8.dll").is_file() {
+            Some(dg.join("D3D8.dll"))
+        } else {
+            None
+        };
+
+        let conf = if dg.join("dgVoodoo.conf").is_file() {
+            dg.join("dgVoodoo.conf")
+        } else {
+            continue;
+        };
+
+        return Some(DgVoodooComponents {
+            d3d9_x86,
+            d3d9_x64,
+            d3d8_x86,
+            conf,
+        });
+    }
+    None
+}
+
+/// Helper to construct a tar.exe command configured with CREATE_NO_WINDOW on Windows
+/// to prevent console window flashing during background component extractions.
+pub fn silent_tar_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("tar.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
+/// Asynchronously resolves, downloads (if missing), verifies, and extracts dgVoodoo2 components.
+pub async fn ensure_dgvoodoo_components(log: &mut Vec<String>) -> Result<DgVoodooComponents, String> {
+    if let Some(local) = find_local_dgvoodoo_components() {
+        return Ok(local);
+    }
+
+    let comp_root = get_components_root();
+    let dgvoodoo_dir = comp_root.join("dgvoodoo");
+    let zip_path = comp_root.join("dgVoodoo2_87_5.zip");
+
+    let _ = fs::create_dir_all(dgvoodoo_dir.join("x86"));
+    let _ = fs::create_dir_all(dgvoodoo_dir.join("x64"));
+
+    log.push("[DOWNLOAD] Fetching dgVoodoo2 v2.87.5 (D3D9/D3D8 -> D3D11 wrapper)...".to_string());
+    download_file_with_sha256(DGVOODOO_URL, &zip_path, DGVOODOO_SHA256).await?;
+
+    let _ = silent_tar_command()
+        .arg("-xf")
+        .arg(&zip_path)
+        .arg("-C")
+        .arg(&dgvoodoo_dir)
+        .arg("dgVoodoo.conf")
+        .status();
+
+    let _ = silent_tar_command()
+        .arg("-xf")
+        .arg(&zip_path)
+        .arg("-C")
+        .arg(dgvoodoo_dir.join("x86"))
+        .arg("--strip-components")
+        .arg("2")
+        .arg("MS/x86/D3D9.dll")
+        .status();
+
+    let _ = silent_tar_command()
+        .arg("-xf")
+        .arg(&zip_path)
+        .arg("-C")
+        .arg(dgvoodoo_dir.join("x86"))
+        .arg("--strip-components")
+        .arg("2")
+        .arg("MS/x86/D3D8.dll")
+        .status();
+
+    let _ = silent_tar_command()
+        .arg("-xf")
+        .arg(&zip_path)
+        .arg("-C")
+        .arg(dgvoodoo_dir.join("x64"))
+        .arg("--strip-components")
+        .arg("2")
+        .arg("MS/x64/D3D9.dll")
+        .status();
+
+    let _ = fs::remove_file(&zip_path);
+
+    find_local_dgvoodoo_components()
+        .ok_or_else(|| "Failed to extract and assemble dgVoodoo2 components".to_string())
+}
+
 /// Checks local search paths before attempting an online download
 pub fn find_local_feeder_components() -> Option<FeederComponents> {
     let mut search_dirs = Vec::new();
@@ -336,6 +504,8 @@ pub fn find_local_feeder_components() -> Option<FeederComponents> {
     for dir in search_dirs {
         let addon64 = if dir.join("dlss5-feed.addon64").is_file() {
             dir.join("dlss5-feed.addon64")
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed.addon64").is_file() {
+            dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed.addon64")
         } else if dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed.addon64").is_file() {
             dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed.addon64")
         } else {
@@ -352,16 +522,42 @@ pub fn find_local_feeder_components() -> Option<FeederComponents> {
 
         let vk_layer_dir = if dir.join("layer-x64").join("VkLayer_feed_vk.dll").is_file() {
             Some(dir.join("layer-x64"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.3").join("layer-x64").join("VkLayer_feed_vk.dll").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.3").join("layer-x64"))
         } else if dir.join("DLSS5-Feeder-1.16.0-beta.1").join("layer-x64").join("VkLayer_feed_vk.dll").is_file() {
             Some(dir.join("DLSS5-Feeder-1.16.0-beta.1").join("layer-x64"))
         } else {
             None
         };
 
+        let addon32 = if dir.join("dlss5-feed.addon32").is_file() {
+            Some(dir.join("dlss5-feed.addon32"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed.addon32").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed.addon32"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed.addon32").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed.addon32"))
+        } else {
+            None
+        };
+
+        let host64 = if dir.join("dlss5-feed-host64.exe").is_file() {
+            Some(dir.join("dlss5-feed-host64.exe"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed-host64.exe").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.3").join("dlss5-feed-host64.exe"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.3").join("host64").join("dlss5-feed-host64.exe").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.3").join("host64").join("dlss5-feed-host64.exe"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed-host64.exe").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.1").join("dlss5-feed-host64.exe"))
+        } else if dir.join("DLSS5-Feeder-1.16.0-beta.1").join("host64").join("dlss5-feed-host64.exe").is_file() {
+            Some(dir.join("DLSS5-Feeder-1.16.0-beta.1").join("host64").join("dlss5-feed-host64.exe"))
+        } else {
+            None
+        };
+
         return Some(FeederComponents {
             addon64,
-            addon32: if dir.join("dlss5-feed.addon32").is_file() { Some(dir.join("dlss5-feed.addon32")) } else { None },
-            host64: if dir.join("dlss5-feed-host64.exe").is_file() { Some(dir.join("dlss5-feed-host64.exe")) } else { None },
+            addon32,
+            host64,
             shader_dir,
             vk_layer_dir,
         });
@@ -377,12 +573,12 @@ pub async fn ensure_feeder_components(log: &mut Vec<String>) -> Result<FeederCom
     }
 
     let comp_root = get_components_root();
-    let feeder_dir = comp_root.join("DLSS5-Feeder-1.16.0-beta.1");
-    let feeder_zip = comp_root.join("DLSS5-Feeder-1.16.0-beta.1.zip");
+    let feeder_dir = comp_root.join("DLSS5-Feeder-1.16.0-beta.3");
+    let feeder_zip = comp_root.join("DLSS5-Feeder-1.16.0-beta.3.zip");
 
-    // 1. Download & extract DLSS5-Feeder v1.16.0-beta.1
+    // 1. Download & extract DLSS5-Feeder v1.16.0-beta.3
     if !feeder_dir.join("dlss5-feed.addon64").is_file() {
-        log.push("[DOWNLOAD] Fetching latest DLSS5-Feeder v1.16.0-beta.1 from upstream GitHub...".to_string());
+        log.push("[DOWNLOAD] Fetching latest DLSS5-Feeder v1.16.0-beta.3 from upstream GitHub...".to_string());
         download_file_with_sha256(FEEDER_ARCHIVE_URL, &feeder_zip, FEEDER_ARCHIVE_SHA256).await?;
         log.push("[DOWNLOAD] Verifying DLSS5-Feeder SHA-256 checksum: OK".to_string());
 
@@ -483,46 +679,50 @@ pub async fn ensure_feeder_components(log: &mut Vec<String>) -> Result<FeederCom
     })
 }
 
-/// Asynchronously resolves or downloads the latest MFG Unlock v0.9 addon
+/// Asynchronously resolves or downloads the latest MFG Unlock v1.0 addon
 pub async fn ensure_mfg_v09_addon(log: &mut Vec<String>) -> Result<PathBuf, String> {
     let comp_root = get_components_root();
-    let mfg_dir = comp_root.join("mfg-unlock-0.9");
+    let mfg_dir = comp_root.join("mfg-unlock-1.0");
     let target = mfg_dir.join("renodx-mfgunlock.addon64");
 
     if target.is_file() {
         if let Ok(hash) = compute_sha256(&target) {
-            if hash.eq_ignore_ascii_case(MFG_09_SHA256) {
+            if hash.eq_ignore_ascii_case(MFG_10_SHA256) {
                 return Ok(target);
             }
         }
     }
 
-    log.push("[DOWNLOAD] Fetching latest MFG Unlock v0.9 (RenoDX companion) from upstream...".to_string());
-    download_file_with_sha256(MFG_09_URL, &target, MFG_09_SHA256).await?;
-    log.push("[DOWNLOAD] Verifying MFG Unlock v0.9 SHA-256: OK".to_string());
+    log.push("[DOWNLOAD] Fetching latest MFG Unlock v1.0 (RenoDX companion) from upstream...".to_string());
+    download_file_with_sha256(MFG_10_URL, &target, MFG_10_SHA256).await?;
+    log.push("[DOWNLOAD] Verifying MFG Unlock v1.0 SHA-256: OK".to_string());
     Ok(target)
 }
 
-/// Asynchronously resolves or downloads the latest OptiScaler DLSS-NR v0.8.3 runtime
+/// Asynchronously resolves or downloads the latest OptiScaler DLSS-NR v0.8.4 runtime
 pub async fn ensure_optiscaler_083_components(log: &mut Vec<String>) -> Result<PathBuf, String> {
     let comp_root = get_components_root();
-    let opti_dir = comp_root.join("OptiScaler-0.8.3-dlssnr");
+    let opti_dir = comp_root.join("OptiScaler-0.8.4-dlssnr");
     if opti_dir.join("OptiScaler.dll").is_file() {
         return Ok(opti_dir);
+    }
+    let fallback_083 = comp_root.join("OptiScaler-0.8.3-dlssnr");
+    if fallback_083.join("OptiScaler.dll").is_file() {
+        return Ok(fallback_083);
     }
     let fallback_077 = comp_root.join("OptiScaler-0.7.7-dlssnr");
     if fallback_077.join("OptiScaler.dll").is_file() {
         return Ok(fallback_077);
     }
 
-    let zip_path = comp_root.join("OptiScaler-NR-v0.8.3.zip");
-    log.push("[DOWNLOAD] Fetching latest OptiScaler DLSS-NR v0.8.3 from upstream...".to_string());
-    download_file_with_sha256(OPTISCALER_083_URL, &zip_path, OPTISCALER_083_SHA256).await?;
-    log.push("[DOWNLOAD] Verifying OptiScaler DLSS-NR v0.8.3 SHA-256: OK".to_string());
+    let zip_path = comp_root.join("OptiScaler-NR-v0.8.4.zip");
+    log.push("[DOWNLOAD] Fetching latest OptiScaler DLSS-NR v0.8.4 from upstream...".to_string());
+    download_file_with_sha256(OPTISCALER_084_URL, &zip_path, OPTISCALER_084_SHA256).await?;
+    log.push("[DOWNLOAD] Verifying OptiScaler DLSS-NR v0.8.4 SHA-256: OK".to_string());
 
     let file = fs::File::open(&zip_path).map_err(|e| format!("Failed to open {}: {}", zip_path.display(), e))?;
     extract_zip(file, &opti_dir)?;
-    log.push("[OPTISCALER] OptiScaler DLSS-NR v0.8.3 unpacked successfully".to_string());
+    log.push("[OPTISCALER] OptiScaler DLSS-NR v0.8.4 unpacked successfully".to_string());
     let _ = fs::remove_file(&zip_path);
 
     Ok(opti_dir)
@@ -564,7 +764,8 @@ pub async fn ensure_streamline_components(log: &mut Vec<String>) -> Result<PathB
 /// Checks whether the RenoDX 4x MFG Unlock addon is cached on disk
 pub fn is_mfg_addon_cached() -> bool {
     let root = get_components_root();
-    root.join("mfg-unlock-0.9").join("renodx-mfgunlock.addon64").is_file()
+    root.join("mfg-unlock-1.0").join("renodx-mfgunlock.addon64").is_file()
+        || root.join("mfg-unlock-0.9").join("renodx-mfgunlock.addon64").is_file()
         || root.join("mfg-unlock-0.8").join("renodx-mfgunlock.addon64").is_file()
         || root.join("renodx-mfgunlock.addon64").is_file()
 }
@@ -584,7 +785,8 @@ pub fn is_renodx_engine_cached() -> bool {
 /// Checks whether the OptiScaler runtime is cached on disk
 pub fn is_optiscaler_cached() -> bool {
     let root = get_components_root();
-    root.join("OptiScaler-0.8.3-dlssnr").join("OptiScaler.dll").is_file()
+    root.join("OptiScaler-0.8.4-dlssnr").join("OptiScaler.dll").is_file()
+        || root.join("OptiScaler-0.8.3-dlssnr").join("OptiScaler.dll").is_file()
         || root.join("OptiScaler-0.7.7-dlssnr").join("OptiScaler.dll").is_file()
         || root.join("OptiScaler.dll").is_file()
 }
@@ -595,11 +797,11 @@ pub fn is_streamline_cached() -> bool {
     streamline_dir.join("sl.interposer.dll").is_file() && streamline_dir.join("sl.common.dll").is_file()
 }
 
-/// Checks whether ReShade 6.8.0 runtime is cached on disk
+/// Checks whether ReShade 6.8.0 runtime (both 64-bit and 32-bit) is cached on disk
 pub fn is_reshade_cached() -> bool {
     let root = get_components_root();
-    root.join("ReShade64.dll").is_file()
-        || root.join("reshade-vulkan").join("ReShade64.dll").is_file()
+    (root.join("ReShade64.dll").is_file() || root.join("reshade-vulkan").join("ReShade64.dll").is_file())
+        && (root.join("ReShade32.dll").is_file() || root.join("reshade-vulkan").join("ReShade32.dll").is_file())
 }
 
 /// Checks whether all mandatory components are already cached on disk
@@ -610,17 +812,19 @@ pub fn are_all_mandatory_components_cached() -> bool {
         && is_optiscaler_cached()
         && is_reshade_cached()
         && is_streamline_cached()
+        && is_dgvoodoo_cached()
 }
 
-/// Extracts ReShade64.dll from the official setup archive using native Windows tar
+/// Extracts ReShade64.dll and ReShade32.dll from the official setup archive using native Windows tar
 pub fn extract_reshade_from_setup(setup_path: &Path, out_dir: &Path) -> Result<(), String> {
     let _ = fs::create_dir_all(out_dir);
-    let status = std::process::Command::new("tar.exe")
+    let status = silent_tar_command()
         .arg("-xf")
         .arg(setup_path)
         .arg("-C")
         .arg(out_dir)
         .arg("ReShade64.dll")
+        .arg("ReShade32.dll")
         .status()
         .map_err(|e| format!("Failed to execute tar.exe to extract ReShade: {}", e))?;
     if !status.success() {
@@ -636,7 +840,7 @@ where
 {
     let mut log = Vec::new();
     let mut errors = Vec::new();
-    const TOTAL_STEPS: usize = 6;
+    const TOTAL_STEPS: usize = 7;
 
     // 1. RenoDX v4.7 Integrated Engine
     if !is_renodx_engine_cached() {
@@ -661,10 +865,10 @@ where
         }
     }
 
-    // 2. RenoDX 4x MFG Unlock v0.9
+    // 2. RenoDX 4x MFG Unlock v1.0
     if !is_mfg_addon_cached() {
         let comp_root = get_components_root();
-        let mfg_dir = comp_root.join("mfg-unlock-0.9");
+        let mfg_dir = comp_root.join("mfg-unlock-1.0");
         let target = mfg_dir.join("renodx-mfgunlock.addon64");
         let _ = fs::create_dir_all(&mfg_dir);
         let mut step_prog = |mut p: DownloadProgress| {
@@ -672,23 +876,23 @@ where
             progress_fn(p);
         };
         if let Err(e) = download_file_with_progress(
-            MFG_09_URL,
+            MFG_10_URL,
             &target,
-            MFG_09_SHA256,
-            "RenoDX 4x MFG Unlock v0.9",
+            MFG_10_SHA256,
+            "RenoDX 4x MFG Unlock v1.0",
             "mfg_unlock",
             &mut step_prog,
         ).await {
-            crate::core::state::log_message(&format!("@{{log_download_error|RenoDX 4x MFG Unlock v0.9|{}}}", e));
-            errors.push(format!("RenoDX 4x MFG Unlock v0.9: {}", e));
+            crate::core::state::log_message(&format!("@{{log_download_error|RenoDX 4x MFG Unlock v1.0|{}}}", e));
+            errors.push(format!("RenoDX 4x MFG Unlock v1.0: {}", e));
         }
     }
 
     // 3. DLSS 5 Feeder & Motion Shaders
     if !is_feeder_cached() {
         let comp_root = get_components_root();
-        let feeder_dir = comp_root.join("DLSS5-Feeder-1.16.0-beta.1");
-        let feeder_zip = comp_root.join("DLSS5-Feeder-1.16.0-beta.1.zip");
+        let feeder_dir = comp_root.join("DLSS5-Feeder-1.16.0-beta.3");
+        let feeder_zip = comp_root.join("DLSS5-Feeder-1.16.0-beta.3.zip");
         if !feeder_dir.join("dlss5-feed.addon64").is_file() {
             let mut step_prog = |mut p: DownloadProgress| {
                 p.percentage = ((2.0 * 100.0) + p.percentage) / TOTAL_STEPS as f32;
@@ -705,35 +909,43 @@ where
                 crate::core::state::log_message(&format!("@{{log_download_error|DLSS 5 Feeder|{}}}", e));
                 errors.push(format!("DLSS 5 Feeder: {}", e));
             } else if let Ok(file) = fs::File::open(&feeder_zip) {
-                let _ = extract_zip(file, &feeder_dir);
-                let _ = fs::remove_file(&feeder_zip);
+                let feeder_dir_c = feeder_dir.clone();
+                let feeder_zip_c = feeder_zip.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = extract_zip(file, &feeder_dir_c);
+                    let _ = fs::remove_file(&feeder_zip_c);
+                }).await;
             }
         }
         let _ = ensure_feeder_components(&mut log).await;
     }
 
-    // 4. OptiScaler DLSS-NR v0.8.3
+    // 4. OptiScaler DLSS-NR v0.8.4
     if !is_optiscaler_cached() {
         let comp_root = get_components_root();
-        let opti_dir = comp_root.join("OptiScaler-0.8.3-dlssnr");
-        let zip_path = comp_root.join("OptiScaler-NR-v0.8.3.zip");
+        let opti_dir = comp_root.join("OptiScaler-0.8.4-dlssnr");
+        let zip_path = comp_root.join("OptiScaler-NR-v0.8.4.zip");
         let mut step_prog = |mut p: DownloadProgress| {
             p.percentage = ((3.0 * 100.0) + p.percentage) / TOTAL_STEPS as f32;
             progress_fn(p);
         };
         if let Err(e) = download_file_with_progress(
-            OPTISCALER_083_URL,
+            OPTISCALER_084_URL,
             &zip_path,
-            OPTISCALER_083_SHA256,
-            "OptiScaler DLSS-NR v0.8.3",
+            OPTISCALER_084_SHA256,
+            "OptiScaler DLSS-NR v0.8.4",
             "optiscaler",
             &mut step_prog,
         ).await {
-            crate::core::state::log_message(&format!("@{{log_download_error|OptiScaler v0.8.3|{}}}", e));
+            crate::core::state::log_message(&format!("@{{log_download_error|OptiScaler v0.8.4|{}}}", e));
             errors.push(format!("OptiScaler DLSS-NR: {}", e));
         } else if let Ok(file) = fs::File::open(&zip_path) {
-            let _ = extract_zip(file, &opti_dir);
-            let _ = fs::remove_file(&zip_path);
+            let opti_dir_c = opti_dir.clone();
+            let zip_path_c = zip_path.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = extract_zip(file, &opti_dir_c);
+                let _ = fs::remove_file(&zip_path_c);
+            }).await;
         }
     }
 
@@ -756,8 +968,12 @@ where
             crate::core::state::log_message(&format!("@{{log_download_error|ReShade 6.8.0|{}}}", e));
             errors.push(format!("ReShade 6.8.0: {}", e));
         } else {
-            let _ = extract_reshade_from_setup(&setup_path, &comp_root);
-            let _ = fs::remove_file(&setup_path);
+            let setup_path_c = setup_path.clone();
+            let comp_root_c = comp_root.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = extract_reshade_from_setup(&setup_path_c, &comp_root_c);
+                let _ = fs::remove_file(&setup_path_c);
+            }).await;
         }
     }
 
@@ -781,8 +997,85 @@ where
             crate::core::state::log_message(&format!("@{{log_download_error|Streamline|{}}}", e));
             errors.push(format!("Streamline Runtime v2.14.1: {}", e));
         } else if let Ok(file) = fs::File::open(&zip_path) {
-            let _ = extract_zip(file, &streamline_dir);
-            let _ = fs::remove_file(&zip_path);
+            let streamline_dir_c = streamline_dir.clone();
+            let zip_path_c = zip_path.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = extract_zip(file, &streamline_dir_c);
+                let _ = fs::remove_file(&zip_path_c);
+            }).await;
+        }
+    }
+
+    // 7. dgVoodoo2 v2.87.5 (Legacy DirectX Wrapper)
+    if !is_dgvoodoo_cached() {
+        let comp_root = get_components_root();
+        let zip_path = comp_root.join("dgVoodoo2_87_5.zip");
+        let mut step_prog = |mut p: DownloadProgress| {
+            p.percentage = ((6.0 * 100.0) + p.percentage) / TOTAL_STEPS as f32;
+            progress_fn(p);
+        };
+        if let Err(e) = download_file_with_progress(
+            DGVOODOO_URL,
+            &zip_path,
+            DGVOODOO_SHA256,
+            "dgVoodoo2 v2.87.5 (Legacy D3D -> D3D11)",
+            "dgvoodoo",
+            &mut step_prog,
+        ).await {
+            crate::core::state::log_message(&format!("@{{log_download_error|dgVoodoo2|{}}}", e));
+            errors.push(format!("dgVoodoo2: {}", e));
+        } else {
+            let comp_root_c = comp_root.clone();
+            let zip_path_c = zip_path.clone();
+            let extract_res = tokio::task::spawn_blocking(move || {
+                let dgvoodoo_dir = comp_root_c.join("dgvoodoo");
+                let _ = fs::create_dir_all(dgvoodoo_dir.join("x86"));
+                let _ = fs::create_dir_all(dgvoodoo_dir.join("x64"));
+
+                let _ = silent_tar_command()
+                    .arg("-xf")
+                    .arg(&zip_path_c)
+                    .arg("-C")
+                    .arg(&dgvoodoo_dir)
+                    .arg("dgVoodoo.conf")
+                    .status();
+
+                let _ = silent_tar_command()
+                    .arg("-xf")
+                    .arg(&zip_path_c)
+                    .arg("-C")
+                    .arg(dgvoodoo_dir.join("x86"))
+                    .arg("--strip-components")
+                    .arg("2")
+                    .arg("MS/x86/D3D9.dll")
+                    .status();
+
+                let _ = silent_tar_command()
+                    .arg("-xf")
+                    .arg(&zip_path_c)
+                    .arg("-C")
+                    .arg(dgvoodoo_dir.join("x86"))
+                    .arg("--strip-components")
+                    .arg("2")
+                    .arg("MS/x86/D3D8.dll")
+                    .status();
+
+                let _ = silent_tar_command()
+                    .arg("-xf")
+                    .arg(&zip_path_c)
+                    .arg("-C")
+                    .arg(dgvoodoo_dir.join("x64"))
+                    .arg("--strip-components")
+                    .arg("2")
+                    .arg("MS/x64/D3D9.dll")
+                    .status();
+
+                let _ = fs::remove_file(&zip_path_c);
+            }).await;
+
+            if let Err(e) = extract_res {
+                errors.push(format!("dgVoodoo2 extraction error: {}", e));
+            }
         }
     }
 
@@ -880,7 +1173,7 @@ mod tests {
 
     #[test]
     fn test_step_progress_calculation() {
-        const TOTAL_STEPS: usize = 6;
+        const TOTAL_STEPS: usize = 7;
         for step in 0..TOTAL_STEPS {
             for pct in [0.0f32, 50.0f32, 100.0f32] {
                 let overall = ((step as f32 * 100.0) + pct) / TOTAL_STEPS as f32;

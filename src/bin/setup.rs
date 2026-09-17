@@ -421,12 +421,28 @@ fn SetupApp() -> Element {
     let mut status_msg = use_signal(|| "Preparing setup...".to_string());
     let mut error_msg = use_signal(|| String::new());
 
-    let default_path = r"C:\DLSS 5 Studio".to_string();
-    let initial_storage = compute_default_storage_path(Path::new(&default_path));
+    let default_path_fallback = r"C:\DLSS 5 Studio".to_string();
+    let existing_info = detect_existing_installation();
+    let is_reinstall = existing_info.is_some();
+    let existing_version = existing_info.as_ref().and_then(|(_, v, _)| v.clone());
+
+    let default_path = if let Some((ref p, _, _)) = existing_info {
+        p.to_string_lossy().to_string()
+    } else {
+        default_path_fallback
+    };
+
+    let initial_storage = if let Some((_, _, Some(ref s))) = existing_info {
+        s.clone()
+    } else {
+        compute_default_storage_path(Path::new(&default_path))
+    };
+
+    let customized_storage = existing_info.as_ref().and_then(|(_, _, ref s)| s.as_ref()).is_some();
 
     let mut install_path = use_signal(move || default_path);
     let mut storage_path = use_signal(move || initial_storage);
-    let mut storage_manually_customized = use_signal(|| false);
+    let mut storage_manually_customized = use_signal(move || customized_storage);
     let mut show_advanced = use_signal(|| false);
     let mut startup_on_boot = use_signal(|| true);
     let mut run_in_background = use_signal(|| true);
@@ -460,6 +476,27 @@ fn SetupApp() -> Element {
             match phase() {
                 SetupPhase::Config => rsx! {
                     div {
+                        if is_reinstall {
+                            div {
+                                style: "background: rgba(217, 119, 6, 0.12); border: 1px solid rgba(217, 119, 6, 0.45); border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px;",
+                                div {
+                                    div { style: "font-size: 13px; font-weight: 600; color: #fbbf24;",
+                                        if let Some(ref v) = existing_version {
+                                            "Existing Installation Detected: v{v} ➔ v{env!(\"CARGO_PKG_VERSION\")}"
+                                        } else {
+                                            "Existing Installation Detected ➔ v{env!(\"CARGO_PKG_VERSION\")}"
+                                        }
+                                    }
+                                    div { style: "font-size: 11.5px; color: #9ca3af; margin-top: 3px;",
+                                        "Your games library, custom settings, and backups will be preserved."
+                                    }
+                                }
+                                span { style: "font-size: 10px; font-weight: 700; letter-spacing: 0.05em; color: #f59e0b; background: rgba(217, 119, 6, 0.2); border: 1px solid rgba(217, 119, 6, 0.45); border-radius: 6px; padding: 4px 8px; flex-shrink: 0;",
+                                    "UPDATE"
+                                }
+                            }
+                        }
+
                         // Installation Location
                         div { class: "section-label", "Installation Location" }
                         div { class: "path-row", style: if is_protected_directory(Path::new(&install_path())) { "margin-bottom: 6px;" } else { "margin-bottom: 20px;" },
@@ -619,7 +656,7 @@ fn SetupApp() -> Element {
                                         }
                                     });
                                 },
-                                "Install Now"
+                                if is_reinstall { "Update" } else { "Install Now" }
                             }
                             button {
                                 class: "btn-cancel",
@@ -729,6 +766,84 @@ fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Detects if DLSS 5 Studio is already installed on the system via Windows registry
+fn detect_existing_installation() -> Option<(PathBuf, Option<String>, Option<String>)> {
+    use windows::Win32::System::Registry::{
+        RegOpenKeyExW, RegQueryValueExW, RegCloseKey, HKEY_CURRENT_USER, KEY_READ, REG_SZ,
+    };
+
+    let subkey = to_wide(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSS 5 Studio");
+    let mut hkey = windows::Win32::System::Registry::HKEY::default();
+
+    unsafe {
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            0,
+            KEY_READ,
+            &mut hkey,
+        ).is_err() {
+            return None;
+        }
+
+        let read_sz = |name: &str| -> Option<String> {
+            let name_w = to_wide(name);
+            let mut data_type = windows::Win32::System::Registry::REG_VALUE_TYPE(0);
+            let mut byte_len: u32 = 0;
+            if RegQueryValueExW(
+                hkey,
+                windows::core::PCWSTR(name_w.as_ptr()),
+                None,
+                Some(&mut data_type),
+                None,
+                Some(&mut byte_len),
+            ).is_err() || byte_len == 0 {
+                return None;
+            }
+
+            let mut buf = vec![0u8; byte_len as usize];
+            if RegQueryValueExW(
+                hkey,
+                windows::core::PCWSTR(name_w.as_ptr()),
+                None,
+                Some(&mut data_type),
+                Some(buf.as_mut_ptr()),
+                Some(&mut byte_len),
+            ).is_ok() && data_type == REG_SZ {
+                let u16_slice: &[u16] = std::slice::from_raw_parts(
+                    buf.as_ptr() as *const u16,
+                    (byte_len as usize) / 2,
+                );
+                let trimmed: Vec<u16> = u16_slice.iter().copied().take_while(|&c| c != 0).collect();
+                String::from_utf16(&trimmed).ok()
+            } else {
+                None
+            }
+        };
+
+        let install_loc = read_sz("InstallLocation");
+        let display_ver = read_sz("DisplayVersion");
+        let _ = RegCloseKey(hkey);
+
+        if let Some(loc_str) = install_loc {
+            let loc_path = PathBuf::from(loc_str);
+            if loc_path.join("dlss-studio.exe").exists() {
+                let mut data_dir = None;
+                let storage_file = loc_path.join("storage.json");
+                if let Ok(content) = std::fs::read_to_string(&storage_file) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(d) = val.get("data_dir").and_then(|v| v.as_str()) {
+                            data_dir = Some(d.to_string());
+                        }
+                    }
+                }
+                return Some((loc_path, display_ver, data_dir));
+            }
+        }
+    }
+    None
+}
+
 /// Registers the application in Windows Installed Apps / Add or Remove Programs registry
 fn register_uninstall_entry(install_dir: &Path, installed_exe: &Path) -> Result<(), String> {
     use windows::Win32::System::Registry::{
@@ -803,6 +918,13 @@ fn run_installation_pipeline(
     std::fs::create_dir_all(&dest)
         .map_err(|e| format!("Could not create directory {}: {}", dest.display(), e))?;
 
+    // 1. Force close any running background instances of dlss-studio before overwriting
+    let _ = std::process::Command::new("taskkill")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["/F", "/IM", "dlss-studio.exe", "/IM", "dlss5-swapper-rust.exe", "/IM", "dlss5-swapper-rust-portable.exe"])
+        .status();
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
     // Determine payload bytes:
     let payload_data: Vec<u8> = if !PAYLOAD.is_empty() {
         PAYLOAD.to_vec()
@@ -823,8 +945,27 @@ fn run_installation_pipeline(
     }
 
     let installed_exe = dest.join("dlss-studio.exe");
-    std::fs::write(&installed_exe, &payload_data)
-        .map_err(|e| format!("Failed to write application binary: {}", e))?;
+    let mut write_res = std::fs::write(&installed_exe, &payload_data);
+    if write_res.is_err() {
+        // Attempt extra process cleanup in case Windows held onto the handle briefly
+        for _ in 0..3 {
+            let _ = std::process::Command::new("taskkill")
+                .creation_flags(CREATE_NO_WINDOW)
+                .args(["/F", "/IM", "dlss-studio.exe", "/IM", "dlss5-swapper-rust.exe", "/IM", "dlss5-swapper-rust-portable.exe"])
+                .status();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            write_res = std::fs::write(&installed_exe, &payload_data);
+            if write_res.is_ok() {
+                break;
+            }
+        }
+    }
+    write_res.map_err(|e| {
+        format!(
+            "Failed to write application binary: {}. If DLSS 5 Studio is currently open or running in the system tray, please exit it and click Retry.",
+            e
+        )
+    })?;
 
     // Write storage configuration into installation folder
     let storage_dest = PathBuf::from(&storage_folder);
@@ -837,9 +978,12 @@ fn run_installation_pipeline(
         serde_json::to_string_pretty(&storage_cfg).unwrap_or_default(),
     );
 
-    // Copy setup.exe as uninstall.exe in target folder
+    // Copy setup.exe as uninstall.exe in target folder (prevent copying onto itself)
     if let Ok(curr) = std::env::current_exe() {
-        let _ = std::fs::copy(&curr, dest.join("uninstall.exe"));
+        let uninst_dest = dest.join("uninstall.exe");
+        if curr != uninst_dest {
+            let _ = std::fs::copy(&curr, &uninst_dest);
+        }
     }
 
     // Create Start Menu shortcut
@@ -890,7 +1034,7 @@ fn perform_native_uninstall(silent: bool) {
     // 1. Terminate any running instances
     let _ = std::process::Command::new("taskkill")
         .creation_flags(CREATE_NO_WINDOW)
-        .args(["/F", "/IM", "dlss-studio.exe"])
+        .args(["/F", "/IM", "dlss-studio.exe", "/IM", "dlss5-swapper-rust.exe", "/IM", "dlss5-swapper-rust-portable.exe"])
         .status();
 
     // 2. Remove Shortcuts

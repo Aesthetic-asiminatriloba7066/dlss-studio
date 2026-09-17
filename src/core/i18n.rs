@@ -51,6 +51,14 @@ pub fn t_param(lang: &str, key: &str, param: &str) -> String {
     t(lang, key).replace("{0}", param)
 }
 
+pub fn t_params(lang: &str, key: &str, params: &[&str]) -> String {
+    let mut s = t(lang, key).to_string();
+    for (i, p) in params.iter().enumerate() {
+        s = s.replace(&format!("{{{}}}", i), p);
+    }
+    s
+}
+
 pub fn t<'a>(lang: &str, key: &'a str) -> &'a str {
     let l = lang.to_lowercase();
     let l_prefix = l.split('-').next().unwrap_or("en");
@@ -1059,6 +1067,22 @@ pub fn t<'a>(lang: &str, key: &'a str) -> &'a str {
         ("ar", "addon_streamline_desc") => "إطار عمل مفتوح المصدر من NVIDIA يسهل دمج تقنيات DLSS و Reflex وتوليد الإطارات عبر وسيط موحد.",
         ("hi", "addon_streamline_desc") => "NVIDIA ओपन-सोर्स क्रॉस-वेंडर फ्रेमवर्क जो एकीकृत इंटरपोज़र डिस्पैच के माध्यम से DLSS, Reflex और Frame Generation के एकीकरण को सरल बनाता है।",
         (_, "addon_streamline_desc") => "NVIDIA open-source cross-vendor framework that simplifies integration of DLSS, Reflex, and Frame Generation via unified interposer dispatch.",
+
+        // --- addon_dgvoodoo_desc ---
+        ("de", "addon_dgvoodoo_desc") => "dgVoodoo2 übersetzt ältere Direct3D 8/9 API-Aufrufe in moderne Direct3D 11 Swapchains und ermöglicht DXGI ReShade & DLSS 5 Neural Rendering für Classic-Titel.",
+        ("es", "addon_dgvoodoo_desc") => "dgVoodoo2 traduce llamadas Direct3D 8/9 heredadas a swapchains Direct3D 11 modernos, permitiendo intercepción DXGI ReShade y DLSS 5 Neural Rendering en títulos clásicos.",
+        ("fr", "addon_dgvoodoo_desc") => "dgVoodoo2 traduit les appels Direct3D 8/9 hérités en swapchains Direct3D 11 modernes, activant l'interception DXGI ReShade et DLSS 5 Neural Rendering pour les jeux classiques.",
+        ("it", "addon_dgvoodoo_desc") => "dgVoodoo2 converte chiamate Direct3D 8/9 legacy in moderni swapchain Direct3D 11, consentendo intercettazione DXGI ReShade e DLSS 5 Neural Rendering per titoli classici.",
+        ("pt", "addon_dgvoodoo_desc") => "dgVoodoo2 converte chamadas legadas de Direct3D 8/9 em swapchains modernas de Direct3D 11, permitindo interceptação DXGI ReShade e DLSS 5 Neural Rendering para títulos clássicos.",
+        ("ru", "addon_dgvoodoo_desc") => "dgVoodoo2 транслирует вызовы устаревших Direct3D 8/9 в современные цепочки показа Direct3D 11, открывая перехват DXGI ReShade и DLSS 5 Neural Rendering для классических игр.",
+        ("zh", "addon_dgvoodoo_desc") => "dgVoodoo2 将旧版 Direct3D 8/9 调用转译为现代 Direct3D 11 交换链，为经典游戏解锁 DXGI ReShade 拦截与 DLSS 5 神经网络渲染。",
+        ("ja", "addon_dgvoodoo_desc") => "dgVoodoo2 はレガシーな Direct3D 8/9 呼び出しを最新の Direct3D 11 スワップチェーンに変換し、クラシックゲームでの DXGI ReShade 傍受と DLSS 5 ニューラル レンダリングを可能にします。",
+        ("ko", "addon_dgvoodoo_desc") => "dgVoodoo2는 레거시 Direct3D 8/9 호출을 최신 Direct3D 11 스왑체인으로 변환하여 클래식 타이틀에서 DXGI ReShade 인터셉트 및 DLSS 5 신경 렌더링을 활성화합니다.",
+        ("pl", "addon_dgvoodoo_desc") => "dgVoodoo2 tłumaczy starsze wywołania Direct3D 8/9 na nowoczesne łańcuchy wymiany Direct3D 11, umożliwiając przechwytywanie DXGI ReShade i renderowanie neuronowe DLSS 5 w klasycznych grach.",
+        ("tr", "addon_dgvoodoo_desc") => "dgVoodoo2 eski Direct3D 8/9 çağrılarını modern Direct3D 11 takas zincirlerine çevirerek klasik oyunlar için DXGI ReShade yakalamasını ve DLSS 5 Nöral İşlemeyi etkinleştirir.",
+        ("ar", "addon_dgvoodoo_desc") => "يقوم dgVoodoo2 بترجمة استدعاءات Direct3D 8/9 القديمة إلى سلاسل تبادل Direct3D 11 حديثة، مما يتيح اعتراض DXGI ReShade و DLSS 5 Neural Rendering للألعاب الكلاسيكية.",
+        ("hi", "addon_dgvoodoo_desc") => "dgVoodoo2 पुराने Direct3D 8/9 कॉल्स को आधुनिक Direct3D 11 स्वैपचेन में अनुवादित करता है, जिससे क्लासिक गेम्स के लिए DXGI ReShade इंटरसेप्ट और DLSS 5 न्यूरल रेंडरिंग सक्षम होती है।",
+        (_, "addon_dgvoodoo_desc") => "dgVoodoo2 translates legacy Direct3D 8 and 9 API calls into modern Direct3D 11 swapchains, enabling DXGI ReShade interception and DLSS 5 Neural Rendering for classic titles.",
 
         // --- backend_reshade_default ---
         ("de", "backend_reshade_default") => "ReShade (Standard)",
@@ -2244,6 +2268,22 @@ pub fn t<'a>(lang: &str, key: &'a str) -> &'a str {
         ("hi", "tag_interposer") => "इंटरपोज़र",
         (_, "tag_interposer") => "Interposer",
 
+        // --- tag_legacy_wrapper ---
+        ("de", "tag_legacy_wrapper") => "Legacy D3D Wrapper",
+        ("es", "tag_legacy_wrapper") => "Wrapper D3D heredado",
+        ("fr", "tag_legacy_wrapper") => "Wrapper D3D hérité",
+        ("it", "tag_legacy_wrapper") => "Wrapper D3D legacy",
+        ("pt", "tag_legacy_wrapper") => "Wrapper D3D legado",
+        ("ru", "tag_legacy_wrapper") => "Обёртка Legacy D3D",
+        ("zh", "tag_legacy_wrapper") => "经典 D3D 转译器",
+        ("ja", "tag_legacy_wrapper") => "レガシー D3D ラッパー",
+        ("ko", "tag_legacy_wrapper") => "레거시 D3D 래퍼",
+        ("pl", "tag_legacy_wrapper") => "Wraper starszego D3D",
+        ("tr", "tag_legacy_wrapper") => "Eski D3D Sarmalayıcı",
+        ("ar", "tag_legacy_wrapper") => "غلاف D3D القديم",
+        ("hi", "tag_legacy_wrapper") => "लीगेसी D3D रैपर",
+        (_, "tag_legacy_wrapper") => "Legacy D3D Wrapper",
+
         // --- tag_neural_reconstruction ---
         ("de", "tag_neural_reconstruction") => "Neuronale Rekonstruktion",
         ("es", "tag_neural_reconstruction") => "Reconstrucción neuronal",
@@ -2435,6 +2475,38 @@ pub fn t<'a>(lang: &str, key: &'a str) -> &'a str {
         ("ar", "tooltip_launch_game") => "تشغيل {0}",
         ("hi", "tooltip_launch_game") => "{0} शुरू करें",
         (_, "tooltip_launch_game") => "Launch {0}",
+
+        // --- tooltip_launch_game_modded ---
+        ("de", "tooltip_launch_game_modded") => "{0} mit aktivem DLSS 5 starten ({1})",
+        ("es", "tooltip_launch_game_modded") => "Iniciar {0} con DLSS 5 activo ({1})",
+        ("fr", "tooltip_launch_game_modded") => "Lancer {0} avec DLSS 5 actif ({1})",
+        ("it", "tooltip_launch_game_modded") => "Avvia {0} con DLSS 5 attivo ({1})",
+        ("pt", "tooltip_launch_game_modded") => "Iniciar {0} com DLSS 5 ativo ({1})",
+        ("ru", "tooltip_launch_game_modded") => "Запустить {0} с активным DLSS 5 ({1})",
+        ("zh", "tooltip_launch_game_modded") => "启动 {0}（已启用 DLSS 5: {1}）",
+        ("ja", "tooltip_launch_game_modded") => "{0} を DLSS 5 有効で起動 ({1})",
+        ("ko", "tooltip_launch_game_modded") => "{0} DLSS 5 활성 상태로 시작 ({1})",
+        ("pl", "tooltip_launch_game_modded") => "Uruchom {0} z aktywnym DLSS 5 ({1})",
+        ("tr", "tooltip_launch_game_modded") => "{0} DLSS 5 aktif olarak başlat ({1})",
+        ("ar", "tooltip_launch_game_modded") => "تشغيل {0} مع DLSS 5 نشط ({1})",
+        ("hi", "tooltip_launch_game_modded") => "{0} सक्रिय DLSS 5 के साथ शुरू करें ({1})",
+        (_, "tooltip_launch_game_modded") => "Launch {0} with DLSS 5 Active ({1})",
+
+        // --- tooltip_launch_game_vanilla ---
+        ("de", "tooltip_launch_game_vanilla") => "{0} starten (Original / Unverändert)",
+        ("es", "tooltip_launch_game_vanilla") => "Iniciar {0} (Original / Sin mods)",
+        ("fr", "tooltip_launch_game_vanilla") => "Lancer {0} (Original / Sans mod)",
+        ("it", "tooltip_launch_game_vanilla") => "Avvia {0} (Originale / Non modificato)",
+        ("pt", "tooltip_launch_game_vanilla") => "Iniciar {0} (Original / Sem mods)",
+        ("ru", "tooltip_launch_game_vanilla") => "Запустить {0} (Оригинальная версия)",
+        ("zh", "tooltip_launch_game_vanilla") => "启动 {0}（原始未修改版本）",
+        ("ja", "tooltip_launch_game_vanilla") => "{0} を起動 (バニラ / 未変更)",
+        ("ko", "tooltip_launch_game_vanilla") => "{0} 시작 (바닐라 / 미수정)",
+        ("pl", "tooltip_launch_game_vanilla") => "Uruchom {0} (Oryginał / Bez modów)",
+        ("tr", "tooltip_launch_game_vanilla") => "{0} Başlat (Orijinal / Modsuz)",
+        ("ar", "tooltip_launch_game_vanilla") => "تشغيل {0} (أصلي / غير معدل)",
+        ("hi", "tooltip_launch_game_vanilla") => "{0} शुरू करें (ओरिजिनल / अनमॉडेड)",
+        (_, "tooltip_launch_game_vanilla") => "Launch {0} (Vanilla / Unmodded)",
 
         // --- tooltip_open_explorer ---
         ("de", "tooltip_open_explorer") => "Im Datei-Explorer öffnen",
@@ -4052,6 +4124,38 @@ pub fn t<'a>(lang: &str, key: &'a str) -> &'a str {
         ("hi", "log_game_launched") => "शुरू किया गया: {0}",
         (_, "log_game_launched") => "Launched: {0}",
 
+        // --- log_game_launched_modded ---
+        ("de", "log_game_launched_modded") => "Gestartet: {0} mit DLSS 5 ({1})",
+        ("es", "log_game_launched_modded") => "Iniciado: {0} con DLSS 5 ({1})",
+        ("fr", "log_game_launched_modded") => "Lancé : {0} avec DLSS 5 ({1})",
+        ("it", "log_game_launched_modded") => "Avviato: {0} con DLSS 5 ({1})",
+        ("pt", "log_game_launched_modded") => "Iniciado: {0} com DLSS 5 ({1})",
+        ("ru", "log_game_launched_modded") => "Запущено: {0} с DLSS 5 ({1})",
+        ("zh", "log_game_launched_modded") => "已启动：{0}（已启用 DLSS 5: {1}）",
+        ("ja", "log_game_launched_modded") => "起動完了: {0} (DLSS 5: {1})",
+        ("ko", "log_game_launched_modded") => "실행됨: {0} (DLSS 5: {1})",
+        ("pl", "log_game_launched_modded") => "Uruchomiono: {0} z DLSS 5 ({1})",
+        ("tr", "log_game_launched_modded") => "Başlatıldı: {0} (DLSS 5: {1})",
+        ("ar", "log_game_launched_modded") => "تم التشغيل: {0} مع DLSS 5 ({1})",
+        ("hi", "log_game_launched_modded") => "शुरू किया गया: {0} (DLSS 5: {1})",
+        (_, "log_game_launched_modded") => "Launched: {0} with DLSS 5 Active ({1})",
+
+        // --- log_game_launched_vanilla ---
+        ("de", "log_game_launched_vanilla") => "Gestartet: {0} (Original / Unverändert)",
+        ("es", "log_game_launched_vanilla") => "Iniciado: {0} (Original / Sin mods)",
+        ("fr", "log_game_launched_vanilla") => "Lancé : {0} (Original / Sans mod)",
+        ("it", "log_game_launched_vanilla") => "Avviato: {0} (Originale / Non modificato)",
+        ("pt", "log_game_launched_vanilla") => "Iniciado: {0} (Original / Sem mods)",
+        ("ru", "log_game_launched_vanilla") => "Запущено: {0} (Оригинальная версия)",
+        ("zh", "log_game_launched_vanilla") => "已启动：{0}（原始未修改版本）",
+        ("ja", "log_game_launched_vanilla") => "起動完了: {0} (バニラ / 未変更)",
+        ("ko", "log_game_launched_vanilla") => "실행됨: {0} (바닐라 / 미수정)",
+        ("pl", "log_game_launched_vanilla") => "Uruchomiono: {0} (Oryginał / Bez modów)",
+        ("tr", "log_game_launched_vanilla") => "Başlatıldı: {0} (Orijinal / Modsuz)",
+        ("ar", "log_game_launched_vanilla") => "تم التشغيل: {0} (أصلي / غير معدل)",
+        ("hi", "log_game_launched_vanilla") => "शुरू किया गया: {0} (ओरिजिनल / अनमॉडेड)",
+        (_, "log_game_launched_vanilla") => "Launched: {0} (Vanilla / Unmodded)",
+
         // --- log_library_loaded ---
         ("de", "log_library_loaded") => "Bibliothek geladen: {0} Spiele im Cache",
         ("es", "log_library_loaded") => "Biblioteca cargada: {0} juegos en caché",
@@ -4226,6 +4330,8 @@ mod tests {
             "log_download_error",
             "log_found_games",
             "log_game_launched",
+            "log_game_launched_modded",
+            "log_game_launched_vanilla",
             "log_library_loaded",
             "log_library_ready",
             "log_overlay_client_pid",
@@ -4319,6 +4425,7 @@ mod tests {
             "addon_optiscaler_desc",
             "addon_reshade_desc",
             "addon_streamline_desc",
+            "addon_dgvoodoo_desc",
             "backend_reshade_default",
             "badge_no_dlss",
             "badge_ready_dlss5",
@@ -4392,6 +4499,7 @@ mod tests {
             "tag_companion",
             "tag_graphics_hook",
             "tag_interposer",
+            "tag_legacy_wrapper",
             "tag_neural_reconstruction",
             "tag_rtx40",
             "tag_universal_intercept",
@@ -4404,6 +4512,8 @@ mod tests {
             "tooltip_click_change_cover",
             "tooltip_hide_game",
             "tooltip_launch_game",
+            "tooltip_launch_game_modded",
+            "tooltip_launch_game_vanilla",
             "tooltip_open_explorer",
             "tooltip_open_log_file",
             "tooltip_remove_addon",

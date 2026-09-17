@@ -53,7 +53,7 @@ fn format_status(lang: &str, status: &AppStatus) -> String {
         AppStatus::ScanningLibrary => crate::core::i18n::t(lang, "status_scanning_library").to_string(),
         AppStatus::ScanningFolder(folder) => format!("{} {}...", crate::core::i18n::t(lang, "status_scanning_folder"), folder),
         AppStatus::ScanningLaunchers => crate::core::i18n::t(lang, "status_scanning_launchers").to_string(),
-        AppStatus::FoundGames(count) => format!("{} ({} {})", crate::core::i18n::t(lang, "status_found_games"), count, crate::core::i18n::t(lang, "tab_games").to_lowercase()),
+        AppStatus::FoundGames(count) => crate::core::i18n::t_param(lang, "status_found_games", &count.to_string()),
     }
 }
 
@@ -123,6 +123,53 @@ fn resolve_game_title(row: &HistoryRow, games: &[GameEntry]) -> String {
     row.dir.clone()
 }
 
+static RESOLVING_ART_DIRS: std::sync::Mutex<Option<std::collections::HashSet<std::path::PathBuf>>> =
+    std::sync::Mutex::new(None);
+
+pub fn trigger_artwork_resolution(
+    mut games: Signal<Vec<GameEntry>>,
+    targets: Vec<(String, std::path::PathBuf)>,
+) {
+    if targets.is_empty() {
+        return;
+    }
+
+    let mut filtered = Vec::new();
+    if let Ok(mut guard) = RESOLVING_ART_DIRS.lock() {
+        let set = guard.get_or_insert_with(std::collections::HashSet::new);
+        for (name, dir) in targets {
+            if set.insert(dir.clone()) {
+                filtered.push((name, dir));
+            }
+        }
+    }
+
+    if filtered.is_empty() {
+        return;
+    }
+
+    spawn(async move {
+        for (g_name, g_dir) in filtered {
+            let art = crate::core::steamart::resolve_game_art(&g_name, &g_dir, None).await;
+            if let Some(cover) = art.cover_path {
+                let mut list = games.read().clone();
+                if let Some(item) = list.iter_mut().find(|x| x.dir == g_dir) {
+                    item.poster = Some(cover);
+                    games.set(list.clone());
+                    let mut s = load_state();
+                    s.cached_games = list;
+                    let _ = save_state(&s);
+                }
+            }
+            if let Ok(mut guard) = RESOLVING_ART_DIRS.lock() {
+                if let Some(set) = guard.as_mut() {
+                    set.remove(&g_dir);
+                }
+            }
+        }
+    });
+}
+
 pub fn App() -> Element {
     let init_state = use_hook(|| {
         let mut state = load_state();
@@ -169,6 +216,7 @@ pub fn App() -> Element {
         if state_changed {
             let _ = crate::core::state::save_state(&state);
         }
+        log_message(&format!("@{{log_library_loaded|{}}}", state.cached_games.len()));
         state
     });
 
@@ -210,6 +258,7 @@ pub fn App() -> Element {
 
     // Status bar state
     let mut status_text = use_signal(|| "Ready".to_string());
+    let mut is_downloading_components = use_signal(|| !crate::core::downloader::are_all_mandatory_components_cached());
     let mut status_state = use_signal(|| {
         if crate::core::downloader::are_all_mandatory_components_cached() {
             AppStatus::Ready
@@ -262,11 +311,15 @@ pub fn App() -> Element {
         let _ = *trigger_component_download.read();
         async move {
             if !crate::core::downloader::are_all_mandatory_components_cached() {
+                is_downloading_components.set(true);
                 status_state.set(AppStatus::DownloadingComponents);
                 status_percent.set(0.0);
                 let res = crate::core::downloader::ensure_all_mandatory_components_with_progress(|prog| {
                     status_percent.set(prog.percentage);
                     if prog.is_downloading {
+                        if *status_state.read() != AppStatus::DownloadingComponents {
+                            status_state.set(AppStatus::DownloadingComponents);
+                        }
                         let bytes_str = match prog.total_bytes {
                             Some(total) => format!(" ({} / {})", crate::core::downloader::format_bytes(prog.downloaded_bytes), crate::core::downloader::format_bytes(total)),
                             None => format!(" ({})", crate::core::downloader::format_bytes(prog.downloaded_bytes)),
@@ -277,6 +330,7 @@ pub fn App() -> Element {
                     }
                 }).await;
 
+                is_downloading_components.set(false);
                 if crate::core::downloader::are_all_mandatory_components_cached() {
                     status_percent.set(100.0);
                     component_download_status.set(None);
@@ -288,6 +342,7 @@ pub fn App() -> Element {
                     status_state.set(AppStatus::DownloadFailed(err));
                 }
             } else {
+                is_downloading_components.set(false);
                 status_percent.set(100.0);
                 component_download_status.set(None);
                 status_state.set(AppStatus::Ready);
@@ -332,9 +387,6 @@ pub fn App() -> Element {
     let mut group_games_by_store = use_signal(move || init_group);
     let mut auto_scan_drives = use_signal(move || init_auto_scan);
     let mut managed_folders = use_signal(move || init_folders);
-
-    // start_overlay_bridge(); // Shelved for standalone stability
-    log_message(&format!("@{{log_library_loaded|{}}}", games.read().len()));
 
     // Activity log for Home view
     let mut activity_log = use_signal(get_session_log);
@@ -399,9 +451,11 @@ pub fn App() -> Element {
                 return;
             }
 
-            status_text.set("Scanning library in background...".to_string());
-            status_state.set(AppStatus::ScanningLibrary);
-            status_percent.set(30.0);
+            if !*is_downloading_components.read() {
+                status_text.set("Scanning library in background...".to_string());
+                status_state.set(AppStatus::ScanningLibrary);
+                status_percent.set(30.0);
+            }
             log_message("@{log_scanning_background}");
             activity_log.set(get_session_log());
 
@@ -447,21 +501,7 @@ pub fn App() -> Element {
                     .collect();
 
                 if !missing.is_empty() {
-                    spawn(async move {
-                        for (g_name, g_dir) in missing {
-                            let art = crate::core::steamart::resolve_game_art(&g_name, &g_dir, None).await;
-                            if let Some(cover) = art.cover_path {
-                                let mut list = games.read().clone();
-                                if let Some(item) = list.iter_mut().find(|x| x.dir == g_dir) {
-                                    item.poster = Some(cover);
-                                    games.set(list.clone());
-                                    let mut s = load_state();
-                                    s.cached_games = list;
-                                    let _ = save_state(&s);
-                                }
-                            }
-                        }
-                    });
+                    trigger_artwork_resolution(games, missing);
                 }
             }
 
@@ -475,9 +515,11 @@ pub fn App() -> Element {
             log_message(&format!("@{{log_library_ready|{}|{}}}", g_count, dx12_count));
             activity_log.set(get_session_log());
 
-            status_text.set("Ready".to_string());
-            status_state.set(AppStatus::Ready);
-            status_percent.set(100.0);
+            if !*is_downloading_components.read() {
+                status_text.set("Ready".to_string());
+                status_state.set(AppStatus::Ready);
+                status_percent.set(100.0);
+            }
         });
     });
 
@@ -652,8 +694,19 @@ pub fn App() -> Element {
                         }
                         b { id: "statusText", "{format_status(&current_lang.read(), &status_state.read())}" }
                     }
-                    p { class: "status-sub", "DLSS 5 Studio" }
-                    p { class: "status-sub", id: "statusVersion", "v1.0" }
+                    p {
+                        class: "status-sub",
+                        if matches!(*status_state.read(), AppStatus::DownloadingComponents) {
+                            if let Some(ref msg) = *component_download_status.read() {
+                                "{msg}"
+                            } else {
+                                "{status_percent.read():.0}%"
+                            }
+                        } else {
+                            "DLSS 5 Studio"
+                        }
+                    }
+                    p { class: "status-sub", id: "statusVersion", "v{crate::core::APP_VERSION}" }
                     div { class: "bar",
                         i { id: "statusBar", style: "width: {status_percent.read()}%;" }
                     }
@@ -811,10 +864,10 @@ pub fn App() -> Element {
                                                 }
                                                 let mut current_games = games.read().clone();
                                                 let idx = if let Some(pos) = current_games.iter().position(|g| g.dir == game.dir) {
-                                                    current_games[pos] = game;
+                                                    current_games[pos] = game.clone();
                                                     pos
                                                 } else {
-                                                    current_games.push(game);
+                                                    current_games.push(game.clone());
                                                     current_games.len() - 1
                                                 };
                                                 s.cached_games = current_games.clone();
@@ -824,6 +877,9 @@ pub fn App() -> Element {
                                                 sheet_game_idx.set(Some(idx));
                                                 sheet_open.set(true);
                                                 active_view.set("games".to_string());
+                                                if game.poster.is_none() {
+                                                    trigger_artwork_resolution(games, vec![(game.name.clone(), game.dir.clone())]);
+                                                }
                                             }
                                         }
                                     });
@@ -869,6 +925,12 @@ pub fn App() -> Element {
                                                 let g_dir = game.dir.clone();
                                                 let is_ready = game.optiscaler_installed || game.mfg_unlock_installed;
                                                 let poster_opt = game.poster.as_ref().map(|p| crate::core::steamart::normalize_art_uri(p));
+                                                let is_dlss5 = game.is_dlss5_patched();
+                                                let launch_tooltip = if is_dlss5 {
+                                                    crate::core::i18n::t_params(&current_lang.read(), "tooltip_launch_game_modded", &[&g_name, game.route_display_name()])
+                                                } else {
+                                                    crate::core::i18n::t_param(&current_lang.read(), "tooltip_launch_game_vanilla", &g_name)
+                                                };
                                                 rsx! {
                                                     article {
                                                         class: "rcard",
@@ -910,8 +972,8 @@ pub fn App() -> Element {
                                                             }
                                                         }
                                                         button {
-                                                            class: "card-center-play",
-                                                            title: "{crate::core::i18n::t_param(&current_lang.read(), \"tooltip_launch_game\", &g_name)}",
+                                                            class: if is_dlss5 { "card-center-play modded" } else { "card-center-play vanilla" },
+                                                            title: "{launch_tooltip}",
                                                             onclick: {
                                                                 let g = game.clone();
                                                                 move |e: MouseEvent| {
@@ -1069,6 +1131,9 @@ pub fn App() -> Element {
                                                      games.set(deduped);
                                                      sheet_game_idx.set(Some(idx));
                                                      sheet_open.set(true);
+                                                     if game.poster.is_none() {
+                                                         trigger_artwork_resolution(games, vec![(game.name.clone(), game.dir.clone())]);
+                                                     }
                                                  }
                                              }
                                          });
@@ -1104,7 +1169,14 @@ pub fn App() -> Element {
                                                  let deduped = dedupe_games(current_games);
                                                  s.cached_games = deduped.clone();
                                                  let _ = save_state(&s);
-                                                 games.set(deduped);
+                                                 games.set(deduped.clone());
+                                                 let missing: Vec<(String, std::path::PathBuf)> = deduped.iter()
+                                                     .filter(|g| g.poster.is_none())
+                                                     .map(|g| (g.name.clone(), g.dir.clone()))
+                                                     .collect();
+                                                 if !missing.is_empty() {
+                                                     trigger_artwork_resolution(games, missing);
+                                                 }
                                                  status_text.set("Ready".to_string());
                                                  status_state.set(AppStatus::Ready);
                                                  status_percent.set(100.0);
@@ -1118,9 +1190,11 @@ pub fn App() -> Element {
                                      id: "rescan",
                                      onclick: move |_| {
                                          spawn(async move {
-                                             status_text.set("Scanning launchers and custom folders...".to_string());
-                                                status_state.set(AppStatus::ScanningLaunchers);
-                                             status_percent.set(30.0);
+                                             if !*is_downloading_components.read() {
+                                                 status_text.set("Scanning launchers and custom folders...".to_string());
+                                                 status_state.set(AppStatus::ScanningLaunchers);
+                                                 status_percent.set(30.0);
+                                             }
                                              let deduped = tokio::task::spawn_blocking(move || {
                                                  let mut discovered = discover_all_launchers();
                                                  let s = load_state();
@@ -1142,14 +1216,23 @@ pub fn App() -> Element {
                                                  g_list
                                              }).await.unwrap_or_default();
 
-                                            status_percent.set(100.0);
-                                            status_text.set(format!("Found {} games across sources", deduped.len()));
-                                                status_state.set(AppStatus::FoundGames(deduped.len()));
-                                            games.set(deduped.clone());
+                                             if !*is_downloading_components.read() {
+                                                 status_percent.set(100.0);
+                                                 status_text.set(crate::core::i18n::t_param(&current_lang.read(), "status_found_games", &deduped.len().to_string()));
+                                                 status_state.set(AppStatus::FoundGames(deduped.len()));
+                                             }
+                                             games.set(deduped.clone());
 
                                             let mut s = load_state();
-                                            s.cached_games = deduped;
+                                            s.cached_games = deduped.clone();
                                             let _ = save_state(&s);
+                                            let missing: Vec<(String, std::path::PathBuf)> = deduped.iter()
+                                                .filter(|g| g.poster.is_none())
+                                                .map(|g| (g.name.clone(), g.dir.clone()))
+                                                .collect();
+                                            if !missing.is_empty() {
+                                                trigger_artwork_resolution(games, missing);
+                                            }
                                         });
                                     },
                                     "{crate::core::i18n::t(&current_lang.read(), \"rescan\")}"
@@ -1286,6 +1369,12 @@ pub fn App() -> Element {
                                                                 let has_addon = game.mfg_unlock_installed || game.has_backup;
                                                                 let is_dx12 = game.api == "DirectX 12";
                                                                 let poster_opt = game.poster.as_ref().map(|p| crate::core::steamart::normalize_art_uri(p));
+                                                                let is_dlss5 = game.is_dlss5_patched();
+                                                                let launch_tooltip = if is_dlss5 {
+                                                                    crate::core::i18n::t_params(&current_lang.read(), "tooltip_launch_game_modded", &[&g_name, game.route_display_name()])
+                                                                } else {
+                                                                    crate::core::i18n::t_param(&current_lang.read(), "tooltip_launch_game_vanilla", &g_name)
+                                                                };
                                                                 rsx! {
                                                                     article {
                                                                         class: if is_dx12 { "card dx12" } else { "card" },
@@ -1347,8 +1436,8 @@ pub fn App() -> Element {
                                                                             }
                                                                         }
                                                                         button {
-                                                                            class: "card-center-play",
-                                                                            title: "{crate::core::i18n::t_param(&current_lang.read(), \"tooltip_launch_game\", &g_name)}",
+                                                                            class: if is_dlss5 { "card-center-play modded" } else { "card-center-play vanilla" },
+                                                                            title: "{launch_tooltip}",
                                                                             onclick: {
                                                                                 let g = game.clone();
                                                                                 move |e: MouseEvent| {
@@ -1406,6 +1495,12 @@ pub fn App() -> Element {
                                             let has_addon = game.mfg_unlock_installed || game.has_backup;
                                             let is_dx12 = game.api == "DirectX 12";
                                             let poster_opt = game.poster.as_ref().map(|p| crate::core::steamart::normalize_art_uri(p));
+                                            let is_dlss5 = game.is_dlss5_patched();
+                                            let launch_tooltip = if is_dlss5 {
+                                                crate::core::i18n::t_params(&current_lang.read(), "tooltip_launch_game_modded", &[&g_name, game.route_display_name()])
+                                            } else {
+                                                crate::core::i18n::t_param(&current_lang.read(), "tooltip_launch_game_vanilla", &g_name)
+                                            };
                                             rsx! {
                                                 article {
                                                     class: if is_dx12 { "card dx12" } else { "card" },
@@ -1467,8 +1562,8 @@ pub fn App() -> Element {
                                                         }
                                                     }
                                                     button {
-                                                        class: "card-center-play",
-                                                        title: "{crate::core::i18n::t_param(&current_lang.read(), \"tooltip_launch_game\", &g_name)}",
+                                                        class: if is_dlss5 { "card-center-play modded" } else { "card-center-play vanilla" },
+                                                        title: "{launch_tooltip}",
                                                         onclick: {
                                                             let g = game.clone();
                                                             move |e: MouseEvent| {
@@ -1620,12 +1715,12 @@ pub fn App() -> Element {
                                 }
                                 div { class: "body",
                                     div { class: "t",
-                                        "RenoDX 4x MFG Unlock v0.9"
+                                        "RenoDX 4x MFG Unlock v1.0"
                                         span { class: "tag warn", "{crate::core::i18n::t(&current_lang.read(), \"tag_rtx40\")}" }
                                     }
-                                    div { class: "d", "renodx-mfgunlock.addon64 · v0.9 · {crate::core::i18n::t(&current_lang.read(), \"meta_sha256_verified\")} · 528 KB" }
+                                    div { class: "d", "renodx-mfgunlock.addon64 · v1.0 · {crate::core::i18n::t(&current_lang.read(), \"meta_sha256_verified\")} · 528 KB" }
                                     div { class: "dim", style: "font-size:0.75em; margin-top:3px; opacity:0.75; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",
-                                        "{crate::core::i18n::t(&current_lang.read(), \"label_source\")} {crate::core::downloader::MFG_09_URL}"
+                                        "{crate::core::i18n::t(&current_lang.read(), \"label_source\")} {crate::core::downloader::MFG_10_URL}"
                                     }
                                     div { class: "dim", style: "font-size:0.82em; margin-top:4px;",
                                         "{crate::core::i18n::t(&current_lang.read(), \"addon_mfg_desc\")}"
@@ -1713,9 +1808,9 @@ pub fn App() -> Element {
                                         "OptiScaler DLSS-NR (Neural Reconstruction & Pre-SR)"
                                         span { class: "tag", "{crate::core::i18n::t(&current_lang.read(), \"tag_neural_reconstruction\")}" }
                                     }
-                                    div { class: "d", "OptiScaler.dll + nvngx.ini · v0.7.8 · {crate::core::i18n::t(&current_lang.read(), \"meta_native_backend\")} · 18.4 MB" }
+                                    div { class: "d", "OptiScaler.dll + nvngx.ini · v0.8.4 · {crate::core::i18n::t(&current_lang.read(), \"meta_native_backend\")} · 18.4 MB" }
                                     div { class: "dim", style: "font-size:0.75em; margin-top:3px; opacity:0.75; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",
-                                        "{crate::core::i18n::t(&current_lang.read(), \"label_source\")} {crate::core::downloader::OPTISCALER_083_URL}"
+                                        "{crate::core::i18n::t(&current_lang.read(), \"label_source\")} {crate::core::downloader::OPTISCALER_084_URL}"
                                     }
                                     div { class: "dim", style: "font-size:0.82em; margin-top:4px;",
                                         "{crate::core::i18n::t(&current_lang.read(), \"addon_optiscaler_desc\")}"
@@ -1834,7 +1929,52 @@ pub fn App() -> Element {
                                 }
                             }
 
-                            // 4. Custom user-added add-ons
+                            // 7. dgVoodoo2 Legacy DirectX Wrapper v2.87.5
+                            div { class: if crate::core::downloader::is_dgvoodoo_cached() { "addon on" } else { "addon" },
+                                div { class: "mark",
+                                    if crate::core::downloader::is_dgvoodoo_cached() {
+                                        svg { style: "width:18px; height:18px; fill:currentColor;", view_box: "0 0 24 24",
+                                            path { d: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" }
+                                        }
+                                    }
+                                }
+                                div { class: "body",
+                                    div { class: "t",
+                                        "dgVoodoo2 (Legacy DirectX Wrapper)"
+                                        span { class: "tag", "{crate::core::i18n::t(&current_lang.read(), \"tag_legacy_wrapper\")}" }
+                                    }
+                                    div { class: "d", "d3d9.dll / d3d8.dll · v2.87.5 · D3D -> D3D11 Translation · 1.4 MB" }
+                                    div { class: "dim", style: "font-size:0.75em; margin-top:3px; opacity:0.75; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",
+                                        "{crate::core::i18n::t(&current_lang.read(), \"label_source\")} {crate::core::downloader::DGVOODOO_URL}"
+                                    }
+                                    div { class: "dim", style: "font-size:0.82em; margin-top:4px;",
+                                        "{crate::core::i18n::t(&current_lang.read(), \"addon_dgvoodoo_desc\")}"
+                                    }
+                                }
+                                div { class: "addon-status-core", style: "display:flex; align-items:center; gap:8px;",
+                                    if crate::core::downloader::is_dgvoodoo_cached() {
+                                        span { class: "tag accent", style: "font-weight:600; font-size:0.75rem; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px;",
+                                            "✓ {crate::core::i18n::t(&current_lang.read(), \"addon_core_badge\")}"
+                                        }
+                                    } else {
+                                        button {
+                                            class: "tag warn",
+                                            style: "font-weight:600; font-size:0.75rem; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px; cursor: pointer; border: none; background: rgba(245, 158, 11, 0.2); color: #f59e0b;",
+                                            title: crate::core::i18n::t(&current_lang.read(), "tooltip_retry_download"),
+                                            onclick: move |_| {
+                                                *trigger_component_download.write() += 1;
+                                            },
+                                            if matches!(*status_state.read(), AppStatus::DownloadingComponents) {
+                                                "{status_percent.read():.0}% ..."
+                                            } else {
+                                                "⚡ {crate::core::i18n::t(&current_lang.read(), \"btn_retry_download\")}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 8. Custom user-added add-ons
                             for custom in custom_addons.read().clone().into_iter() {
                                 {
                                     let path_str = custom.path.clone();
@@ -2264,6 +2404,9 @@ pub fn App() -> Element {
                                                     }).await.unwrap_or_default();
 
                                                     let mut s = load_state();
+                                                    for g in &folder_games {
+                                                        s.unhide_game(&g.dir);
+                                                    }
                                                     let f_str = folder.to_string_lossy().to_string();
                                                     if !s.folders.contains(&f_str) {
                                                         s.folders.push(f_str);
@@ -2278,7 +2421,14 @@ pub fn App() -> Element {
                                                     let deduped = dedupe_games(current_games);
                                                     s.cached_games = deduped.clone();
                                                     let _ = save_state(&s);
-                                                    games.set(deduped);
+                                                    games.set(deduped.clone());
+                                                    let missing: Vec<(String, std::path::PathBuf)> = deduped.iter()
+                                                        .filter(|g| g.poster.is_none())
+                                                        .map(|g| (g.name.clone(), g.dir.clone()))
+                                                        .collect();
+                                                    if !missing.is_empty() {
+                                                        trigger_artwork_resolution(games, missing);
+                                                    }
                                                 }
                                             });
                                         },
@@ -2398,7 +2548,7 @@ pub fn App() -> Element {
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"nav_about\")}" }
                         }
                         div { class: "glass pad about",
-                            p { b { "DLSS 5 Studio v1.0" } }
+                            p { b { "DLSS 5 Studio v{crate::core::APP_VERSION}" } }
                             p { "{crate::core::i18n::t(&current_lang.read(), \"about_desc_main\")}" }
                             div { class: "about-links", style: "display:flex; flex-wrap:wrap; gap:10px; margin: 16px 0;",
                                 a { class: "glass-btn", href: "https://github.com/bookamp/dlss-studio", target: "_blank", "{crate::core::i18n::t(&current_lang.read(), \"about_github_repo\")}" }
@@ -2415,6 +2565,9 @@ pub fn App() -> Element {
             if *sheet_open.read() {
                 if let Some(mut target_game) = selected_game {
                     {
+                        if target_game.poster.is_none() {
+                            trigger_artwork_resolution(games, vec![(target_game.name.clone(), target_game.dir.clone())]);
+                        }
                         let hero_p = crate::core::state::get_appdata_dir()
                             .join("art")
                             .join(format!("{}-hero.jpg", crate::core::steamart::key_for_dir(&target_game.dir)));
@@ -2510,6 +2663,21 @@ pub fn App() -> Element {
                             crate::core::i18n::t(&current_lang.read(), "feeder_label_opengl")
                         } else {
                             crate::core::i18n::t(&current_lang.read(), "feeder_label_general")
+                        };
+                        let laa_status = if target_game.bitness == 32 {
+                            if crate::core::pe::is_large_address_aware(&target_game.exe_path) {
+                                " • 4GB Patch (LAA): Active"
+                            } else {
+                                " • 4GB Patch (LAA): Auto on Deploy"
+                            }
+                        } else {
+                            ""
+                        };
+                        let is_dlss5 = target_game.is_dlss5_patched();
+                        let launch_tooltip = if is_dlss5 {
+                            crate::core::i18n::t_params(&current_lang.read(), "tooltip_launch_game_modded", &[&target_game.name, target_game.route_display_name()])
+                        } else {
+                            crate::core::i18n::t_param(&current_lang.read(), "tooltip_launch_game_vanilla", &target_game.name)
                         };
 
                         rsx! {
@@ -2647,7 +2815,7 @@ pub fn App() -> Element {
                                                 }
                                             }
                                         }
-                                        div { class: "meta", "{target_game.launcher} • {target_game.api} • {target_game.bitness}-bit" }
+                                        div { class: "meta", "{target_game.launcher} • {target_game.api} • {target_game.bitness}-bit{laa_status}" }
                                         div {
                                             class: "path",
                                             style: "cursor:pointer;",
@@ -2678,6 +2846,7 @@ pub fn App() -> Element {
                                                                     current_games[pos].exe_rel = opt.rel.clone();
                                                                     current_games[pos].api = opt.api.clone();
                                                                     current_games[pos].bitness = opt.bitness;
+                                                                    current_games[pos].is_laa = opt.is_laa;
                                                                     if current_games[pos].available_exes.is_empty() {
                                                                         current_games[pos].available_exes = exes.clone();
                                                                     }
@@ -2719,8 +2888,8 @@ pub fn App() -> Element {
                                             }
                                         }
                                         button {
-                                            class: "btn-launch-hero",
-                                            title: "{crate::core::i18n::t_param(&current_lang.read(), \"tooltip_launch_game\", &target_game.name)}",
+                                            class: if is_dlss5 { "btn-launch-hero modded" } else { "btn-launch-hero vanilla" },
+                                            title: "{launch_tooltip}",
                                             onclick: {
                                                 let g = target_game.clone();
                                                 move |e: MouseEvent| {
@@ -3041,6 +3210,22 @@ pub fn App() -> Element {
                                                                                 }
                                                                                 Err(e) => {
                                                                                     lines.push(format!("[ERROR] Feeder component resolution failed: {}", e));
+                                                                                    job_lines.set(lines);
+                                                                                    is_busy.set(false);
+                                                                                    return;
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        let api_lower = target_game.api.to_lowercase();
+                                                                        let is_legacy_dx = api_lower.contains('9') || api_lower.contains('8') || api_lower.contains("d3d9") || api_lower.contains("d3d8");
+                                                                        if is_legacy_dx && payloads.dgvoodoo.is_none() {
+                                                                            match crate::core::downloader::ensure_dgvoodoo_components(&mut lines).await {
+                                                                                Ok(dg) => {
+                                                                                    payloads.dgvoodoo = Some(dg);
+                                                                                    job_lines.set(lines.clone());
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    lines.push(format!("[ERROR] dgVoodoo component resolution failed: {}", e));
                                                                                     job_lines.set(lines);
                                                                                     is_busy.set(false);
                                                                                     return;
@@ -3741,7 +3926,11 @@ pub fn App() -> Element {
 
 pub fn launch_game(game: &GameEntry) {
     touch(&game.dir.to_string_lossy());
-    log_message(&format!("@{{log_game_launched|{}}}", game.name));
+    if game.is_dlss5_patched() {
+        log_message(&format!("@{{log_game_launched_modded|{}|{}}}", game.name, game.route_display_name()));
+    } else {
+        log_message(&format!("@{{log_game_launched_vanilla|{}}}", game.name));
+    }
     let target = if game.exe_path.exists() && game.exe_path.is_file() {
         game.exe_path.clone()
     } else {
@@ -3950,6 +4139,13 @@ mod tests {
         std::env::remove_var("DLSS_TEST_VIEW");
         s.cached_games = old_games;
         let _ = save_state(&s);
+    }
+
+    #[test]
+    fn test_format_status_found_games() {
+        assert_eq!(format_status("en", &AppStatus::FoundGames(8)), "Found 8 games across sources");
+        assert_eq!(format_status("de", &AppStatus::FoundGames(12)), "12 Spiele plattformübergreifend gefunden");
+        assert_eq!(format_status("zh", &AppStatus::FoundGames(5)), "共发现 5 款已安装游戏");
     }
 }
 

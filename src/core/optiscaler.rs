@@ -161,6 +161,7 @@ fn get_component_roots() -> Vec<PathBuf> {
 pub fn find_optiscaler_payload() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     for root in get_component_roots() {
+        candidates.push(root.join("OptiScaler-0.8.4-dlssnr"));
         candidates.push(root.join("OptiScaler-0.8.3-dlssnr"));
         candidates.push(root.join("OptiScaler-0.7.7-dlssnr"));
         candidates.push(root.join("OptiScaler-DLSSNR-v0.7.7"));
@@ -171,6 +172,7 @@ pub fn find_optiscaler_payload() -> Option<PathBuf> {
         candidates.push(root.join("OptiScaler-0.2.0-dlssnr"));
     }
     if let Some(exe) = app_exe_dir() {
+        candidates.push(exe.join("components").join("OptiScaler-0.8.4-dlssnr"));
         candidates.push(exe.join("components").join("OptiScaler-0.8.3-dlssnr"));
         candidates.push(exe.join("components").join("OptiScaler-0.7.7-dlssnr"));
         candidates.push(exe.join("components").join("OptiScaler-DLSSNR-v0.7.7"));
@@ -206,6 +208,33 @@ pub fn find_reshade64_payload() -> Option<PathBuf> {
             candidates.push(ancestor.join("payload").join("reshade-vulkan").join("ReShade64.dll"));
             candidates.push(ancestor.join("payload").join("ReShade64.dll"));
             candidates.push(ancestor.join("components").join("reshade-vulkan").join("ReShade64.dll"));
+            candidates.push(ancestor.join("components").join("ReShade64.dll"));
+        }
+    }
+
+    for c in candidates {
+        if c.is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Locates ReShade32.dll payload
+pub fn find_reshade32_payload() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(r"payload\reshade-vulkan\ReShade32.dll"));
+    candidates.push(PathBuf::from(r"payload\ReShade32.dll"));
+    for root in get_component_roots() {
+        candidates.push(root.join("reshade-vulkan").join("ReShade32.dll"));
+        candidates.push(root.join("ReShade32.dll"));
+    }
+    if let Some(exe) = app_exe_dir() {
+        for ancestor in exe.ancestors().take(4) {
+            candidates.push(ancestor.join("payload").join("reshade-vulkan").join("ReShade32.dll"));
+            candidates.push(ancestor.join("payload").join("ReShade32.dll"));
+            candidates.push(ancestor.join("components").join("reshade-vulkan").join("ReShade32.dll"));
+            candidates.push(ancestor.join("components").join("ReShade32.dll"));
         }
     }
 
@@ -221,12 +250,14 @@ pub fn find_reshade64_payload() -> Option<PathBuf> {
 pub fn find_mfg_addon_payload() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     for root in get_component_roots() {
+        candidates.push(root.join("mfg-unlock-1.0").join("renodx-mfgunlock.addon64"));
         candidates.push(root.join("mfg-unlock-0.9").join("renodx-mfgunlock.addon64"));
         candidates.push(root.join("mfg-unlock-0.8").join("renodx-mfgunlock.addon64"));
         candidates.push(root.join("mfg-unlock-0.6.1").join("renodx-mfgunlock.addon64"));
         candidates.push(root.join("renodx-mfgunlock.addon64"));
     }
     if let Some(exe) = app_exe_dir() {
+        candidates.push(exe.join("components").join("mfg-unlock-1.0").join("renodx-mfgunlock.addon64"));
         candidates.push(exe.join("components").join("mfg-unlock-0.9").join("renodx-mfgunlock.addon64"));
         candidates.push(exe.join("components").join("mfg-unlock-0.8").join("renodx-mfgunlock.addon64"));
         candidates.push(exe.join("components").join("mfg-unlock-0.6.1").join("renodx-mfgunlock.addon64"));
@@ -416,10 +447,12 @@ pub struct PayloadBundle {
     pub nvngx_snippet_dll: Option<PathBuf>,
     pub rtxmfg_dll: Option<PathBuf>,
     pub reshade64_dll: Option<PathBuf>,
+    pub reshade32_dll: Option<PathBuf>,
     pub renodx_dlss5_addon: Option<PathBuf>,
     pub renodx_mfgunlock_addon: Option<PathBuf>,
     pub streamline_dir: Option<PathBuf>,
     pub feeder_components: Option<crate::core::downloader::FeederComponents>,
+    pub dgvoodoo: Option<crate::core::downloader::DgVoodooComponents>,
 }
 
 impl PayloadBundle {
@@ -438,10 +471,12 @@ impl PayloadBundle {
         let nvngx_dlssnr_dll = find_dlssnr_payload();
         let rtxmfg_dll = find_standalone_mfg_payload();
         let reshade64_dll = find_reshade64_payload();
+        let reshade32_dll = find_reshade32_payload();
         let renodx_dlss5_addon = find_renodx_payload();
         let renodx_mfgunlock_addon = find_mfg_addon_payload();
         let streamline_dir = find_streamline_payload();
         let feeder_components = crate::core::downloader::find_local_feeder_components();
+        let dgvoodoo = crate::core::downloader::find_local_dgvoodoo_components();
 
         Ok(Self {
             optiscaler_dll,
@@ -452,10 +487,12 @@ impl PayloadBundle {
             nvngx_snippet_dll,
             rtxmfg_dll,
             reshade64_dll,
+            reshade32_dll,
             renodx_dlss5_addon,
             renodx_mfgunlock_addon,
             streamline_dir,
             feeder_components,
+            dgvoodoo,
         })
     }
 }
@@ -562,9 +599,12 @@ fn is_known_mod_file(dest: &Path) -> bool {
         || name == "dlss5-feed.log"
         || name == "dlss5-feed.addon64"
         || name == "dlss5-feed.addon32"
+        || name == "dlss5-feed-host64.exe"
         || name == "dlss5-lab-overlay.addon64"
         || name == "renodx-dlss5.addon64"
         || name == "renodx-mfgunlock.addon64"
+        || name == "dgvoodoo.conf"
+        || name == "dgvoodoo.log"
         || name == "rtxmfg-universal.json"
         || name == "rtx40mfg-universal.json"
         || name.starts_with("rtxmfg-")
@@ -574,10 +614,13 @@ fn is_known_mod_file(dest: &Path) -> bool {
     {
         return true;
     }
-    if dest.components().any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case("OptiScaler")) {
+    if dest.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy();
+        s.eq_ignore_ascii_case("OptiScaler") || s.eq_ignore_ascii_case("host64")
+    }) {
         return true;
     }
-    let hook_names = ["dxgi.dll", "winmm.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "opengl32.dll", "dinput8.dll", "version.dll"];
+    let hook_names = ["dxgi.dll", "winmm.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "d3d8.dll", "opengl32.dll", "dinput8.dll", "version.dll"];
     if hook_names.contains(&name.as_str()) && dest.is_file() {
         return crate::core::pe::is_optiscaler_or_proxy(dest) || crate::core::pe::is_reshade_dll(dest).0;
     }
@@ -593,17 +636,17 @@ fn is_stale_proxy_dll(path: &Path) -> bool {
     }
     if let Ok(bytes) = fs::read(path) {
         let s = String::from_utf8_lossy(&bytes).to_lowercase();
-        if s.contains("reshade") || s.contains("optiscaler") {
+        if s.contains("reshade") || s.contains("optiscaler") || s.contains("dgvoodoo") {
             return true;
         }
     }
     false
 }
 
-fn remove_stale_proxy_hooks(mod_root: &Path, current_hook: &str, log: &mut Vec<String>) {
-    let check_hooks = ["winmm.dll", "version.dll", "dinput8.dll", "dxgi.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "opengl32.dll"];
+fn remove_stale_proxy_hooks(mod_root: &Path, active_hooks: &[&str], log: &mut Vec<String>) {
+    let check_hooks = ["winmm.dll", "version.dll", "dinput8.dll", "dxgi.dll", "d3d12.dll", "d3d11.dll", "d3d9.dll", "d3d8.dll", "opengl32.dll"];
     for stale_name in check_hooks {
-        if !stale_name.eq_ignore_ascii_case(current_hook) {
+        if !active_hooks.iter().any(|h| h.eq_ignore_ascii_case(stale_name)) {
             let stale_p = mod_root.join(stale_name);
             if is_stale_proxy_dll(&stale_p) {
                 if fs::remove_file(&stale_p).is_ok() {
@@ -681,6 +724,13 @@ pub fn clean_conflicting_route_artifacts(
                 }
             }
 
+            let host64_dir = dir.join("host64");
+            if host64_dir.is_dir() {
+                if fs::remove_dir_all(&host64_dir).is_ok() {
+                    log.push(format!("[SWAP] Removed conflicting host64/ from {}", dir.display()));
+                }
+            }
+
             if let Ok(entries) = fs::read_dir(dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
@@ -698,18 +748,21 @@ pub fn clean_conflicting_route_artifacts(
                             || lower == "dlss5-feed.log"
                             || lower == "dlss5-feed.addon64"
                             || lower == "dlss5-feed.addon32"
+                            || lower == "dlss5-feed-host64.exe"
                             || lower == "dlss5-lab-overlay.addon64"
                             || lower == "renodx-dlss5.addon64"
                             || lower == "renodx-mfgunlock.addon64"
+                            || lower == "dgvoodoo.conf"
+                            || lower == "dgvoodoo.log"
                             || lower.ends_with(".addon64")
                             || lower.ends_with(".addon32")
                             || lower.ends_with(".addon");
 
-                        let is_reshade_hook = (lower == "dxgi.dll" || lower == "d3d11.dll" || lower == "d3d12.dll" || lower == "d3d9.dll" || lower == "opengl32.dll")
-                            && (crate::core::pe::is_reshade_dll(&path).0 || {
+                        let is_reshade_hook = (lower == "dxgi.dll" || lower == "d3d11.dll" || lower == "d3d12.dll" || lower == "d3d9.dll" || lower == "d3d8.dll" || lower == "opengl32.dll")
+                            && (crate::core::pe::is_reshade_dll(&path).0 || crate::core::pe::is_optiscaler_or_proxy(&path) || {
                                 if let Ok(bytes) = fs::read(&path) {
                                     let s = String::from_utf8_lossy(&bytes).to_lowercase();
-                                    s.contains("reshade")
+                                    s.contains("reshade") || s.contains("dgvoodoo")
                                 } else {
                                     false
                                 }
@@ -762,11 +815,11 @@ pub fn clean_conflicting_route_artifacts(
                             || lower == "rtx40mfg-universal.json"
                             || (lower.starts_with("rtxmfg-") && lower.ends_with(".json"));
 
-                        let is_opti_or_mfg_hook = (lower == "dxgi.dll" || lower == "version.dll" || lower == "d3d12.dll" || lower == "d3d11.dll" || lower == "d3d9.dll")
+                        let is_opti_or_mfg_hook = (lower == "dxgi.dll" || lower == "version.dll" || lower == "d3d12.dll" || lower == "d3d11.dll" || lower == "d3d9.dll" || lower == "d3d8.dll")
                             && (crate::core::pe::is_optiscaler_or_proxy(&path) || {
                                 if let Ok(bytes) = fs::read(&path) {
                                     let s = String::from_utf8_lossy(&bytes).to_lowercase();
-                                    s.contains("optiscaler") || s.contains("rtxmfg")
+                                    s.contains("optiscaler") || s.contains("rtxmfg") || s.contains("dgvoodoo")
                                 } else {
                                     false
                                 }
@@ -786,10 +839,17 @@ pub fn clean_conflicting_route_artifacts(
                 let _ = fs::remove_file(dir.join("dlss5-feed.log"));
                 let _ = fs::remove_file(dir.join("dlss5-feed.addon64"));
                 let _ = fs::remove_file(dir.join("dlss5-feed.addon32"));
+                let _ = fs::remove_file(dir.join("dlss5-feed-host64.exe"));
+                let _ = fs::remove_file(dir.join("dgvoodoo.conf"));
+                let _ = fs::remove_file(dir.join("dgvoodoo.log"));
                 let _ = fs::remove_file(dir.join("ReShadePreset.ini"));
                 let reshade_shaders = dir.join("reshade-shaders");
                 if reshade_shaders.is_dir() {
                     let _ = fs::remove_dir_all(&reshade_shaders);
+                }
+                let host64_dir = dir.join("host64");
+                if host64_dir.is_dir() {
+                    let _ = fs::remove_dir_all(&host64_dir);
                 }
             } else if target_route == "feeder" {
                 let _ = fs::remove_file(dir.join("dlss5-lab-overlay.addon64"));
@@ -908,6 +968,10 @@ fn track_and_write(
     if let Some(parent) = dest.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
+            let rel_p = parent.strip_prefix(game_dir).unwrap_or(parent).to_string_lossy().to_string();
+            if !rel_p.is_empty() && !manifest.added_dirs.contains(&rel_p) {
+                manifest.added_dirs.push(rel_p);
+            }
         }
     }
 
@@ -965,7 +1029,7 @@ pub fn deploy_optiscaler_with_bundle(opts: &DeployOptions, payloads: &PayloadBun
         "dxgi.dll"
     };
 
-    remove_stale_proxy_hooks(&mod_root, hook_dll, &mut log);
+    remove_stale_proxy_hooks(&mod_root, &[hook_dll], &mut log);
 
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
     let prefix = format!("originals/{}", ts);
@@ -1187,7 +1251,7 @@ pub fn deploy_native_dlss5_with_bundle(opts: &DeployOptions, payloads: &PayloadB
         "dxgi.dll"
     };
 
-    remove_stale_proxy_hooks(&mod_root, hook_dll, &mut log);
+    remove_stale_proxy_hooks(&mod_root, &[hook_dll], &mut log);
 
     // 1. Deploy ReShade64.dll as hook DLL
     if let Some(reshade_src) = &payloads.reshade64_dll {
@@ -1422,6 +1486,111 @@ pub fn configure_feeder_preset(existing: &str) -> String {
     out
 }
 
+/// Formats or updates dgVoodoo.conf for legacy DirectX and Glide titles.
+/// Sets WatermarkDisplayDuration = 3 so that watermarks briefly display for 3 seconds on launch
+/// as visual confirmation that dgVoodoo2 is active, then automatically disappear.
+/// Sets VRAM = 2048 (2GB) under [DirectX] to prevent "Display hardware video memory exhausted"
+/// crashes in 32-bit titles running at 1440p, 4K, or ultrawide resolutions.
+/// Strips any invalid keys previously placed under [General] to keep the dgVoodoo parser healthy.
+pub fn configure_dgvoodoo_conf(base: &str) -> String {
+    let text = base.trim();
+    if text.is_empty() {
+        return "[GeneralExt]\nWatermarkDisplayDuration = 3\n\n[DirectX]\nDisableAndPassThru = false\nVRAM = 2048\ndgVoodooWatermark = true\n\n[Glide]\n3DfxWatermark = true\n3DfxSplashScreen = false\n".to_string();
+    }
+
+    let re_wm_dur = regex::Regex::new(r"(?i)^(\s*WatermarkDisplayDuration\s*=\s*)\S+").unwrap();
+    let re_dg_wm = regex::Regex::new(r"(?i)^(\s*dgVoodooWatermark\s*=\s*)\S+").unwrap();
+    let re_vram = regex::Regex::new(r"(?i)^(\s*VRAM\s*=\s*)\S+").unwrap();
+    let re_3dfx_wm = regex::Regex::new(r"(?i)^(\s*3DfxWatermark\s*=\s*)\S+").unwrap();
+    let re_3dfx_splash = regex::Regex::new(r"(?i)^(\s*3DfxSplashScreen\s*=\s*)\S+").unwrap();
+    let re_pass_thru = regex::Regex::new(r"(?i)^(\s*DisableAndPassThru\s*=\s*)\S+").unwrap();
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_general = false;
+    let mut has_wm_dur = false;
+    let mut has_dg_wm = false;
+    let mut has_vram = false;
+    let mut has_3dfx_wm = false;
+    let mut has_3dfx_splash = false;
+    let mut has_pass_thru = false;
+
+    for line in base.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_general = trimmed.eq_ignore_ascii_case("[General]");
+        }
+
+        // Strip legacy invalid DisableAndPassThru inserted under [General]
+        if in_general && trimmed.eq_ignore_ascii_case("DisableAndPassThru=false") {
+            continue;
+        }
+
+        let mut replaced = line.to_string();
+        if re_wm_dur.is_match(&replaced) {
+            replaced = re_wm_dur.replace(&replaced, "${1}3").to_string();
+            has_wm_dur = true;
+        }
+        if re_dg_wm.is_match(&replaced) {
+            replaced = re_dg_wm.replace(&replaced, "${1}true").to_string();
+            has_dg_wm = true;
+        }
+        if re_vram.is_match(&replaced) {
+            replaced = re_vram.replace(&replaced, "${1}2048").to_string();
+            has_vram = true;
+        }
+        if re_3dfx_wm.is_match(&replaced) {
+            replaced = re_3dfx_wm.replace(&replaced, "${1}true").to_string();
+            has_3dfx_wm = true;
+        }
+        if re_3dfx_splash.is_match(&replaced) {
+            replaced = re_3dfx_splash.replace(&replaced, "${1}false").to_string();
+            has_3dfx_splash = true;
+        }
+        if re_pass_thru.is_match(&replaced) {
+            replaced = re_pass_thru.replace(&replaced, "${1}false").to_string();
+            has_pass_thru = true;
+        }
+
+        lines.push(replaced);
+    }
+
+    let mut result = lines.join("\r\n");
+
+    // If any keys were missing, insert them into their proper sections using set_ini
+    if !has_wm_dur {
+        result = set_ini(&result, "GeneralExt", "WatermarkDisplayDuration", "3");
+    }
+    if !has_vram {
+        result = set_ini(&result, "DirectX", "VRAM", "2048");
+    }
+    if !has_dg_wm {
+        result = set_ini(&result, "DirectX", "dgVoodooWatermark", "true");
+    }
+    if !has_pass_thru {
+        result = set_ini(&result, "DirectX", "DisableAndPassThru", "false");
+    }
+    if !has_3dfx_wm {
+        result = set_ini(&result, "Glide", "3DfxWatermark", "true");
+    }
+    if !has_3dfx_splash {
+        result = set_ini(&result, "Glide", "3DfxSplashScreen", "false");
+    }
+
+    result
+}
+
+/// Formats ReShade.ini for host64 companion helper.
+pub fn configure_host64_reshade_ini() -> String {
+    let mut text = String::new();
+    text = set_ini(&text, "INPUT", "KeyOverlay", "36,0,0,0");
+    text = set_ini(&text, "OVERLAY", "TutorialProgress", "4");
+    text = set_ini(&text, "ADDON", "AddonPath", ".\\");
+    text = set_ini(&text, "RenoDX.DLSS5", "EnableHooks", "1");
+    text = set_ini(&text, "RenoDX.DLSS5", "NeuralUplift", "1");
+    text = set_ini(&text, "RenoDX.DLSS5", "NREnableUpscaling", "0");
+    text
+}
+
 /// Deploys DLSS5-Feeder route using provided payload bundle.
 /// STRICTLY ZERO Pre-SR, ZERO MFG, ZERO OptiScaler files are deployed in this route.
 pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle) -> Result<DeployResult, String> {
@@ -1445,6 +1614,8 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| opts.exe_path.file_name().unwrap_or_default().to_string_lossy().to_string());
 
+    let bitness = crate::core::pe::inspect_pe(&opts.exe_path).map(|p| p.bitness).unwrap_or(64);
+
     let mut manifest = ActiveManifest {
         version: 1,
         date: crate::core::journal::now_timestamp_str(),
@@ -1453,7 +1624,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
             dir: Some(opts.game_dir.to_string_lossy().to_string()),
             exe: Some(exe_rel.clone()),
             api: Some(if opts.api.to_lowercase().contains("vulkan") { "vulkan".to_string() } else { "dxgi".to_string() }),
-            bitness: Some(64),
+            bitness: Some(bitness),
             api_label: Some(opts.api.clone()),
         }),
         game_exe: Some(exe_rel.clone()),
@@ -1465,15 +1636,30 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
 
     carry_forward_existing_backups(&opts.game_dir, &backup_dir, &mut manifest, &mut log);
 
-    let hook_dll = if opts.api.to_lowercase().contains("9") {
-        "d3d9.dll"
-    } else if opts.api.to_lowercase().contains("opengl") {
-        "opengl32.dll"
+    let api_lower = opts.api.to_lowercase();
+    let is_legacy_dx = api_lower.contains('9') || api_lower.contains('8') || api_lower.contains("d3d9") || api_lower.contains("d3d8");
+    let use_dgvoodoo = is_legacy_dx && payloads.dgvoodoo.is_some();
+
+    let (hook_dll, dg_hook_name) = if use_dgvoodoo {
+        let dg_name = if api_lower.contains('8') || api_lower.contains("d3d8") {
+            "d3d8.dll"
+        } else {
+            "d3d9.dll"
+        };
+        ("dxgi.dll", Some(dg_name))
+    } else if api_lower.contains('9') {
+        ("d3d9.dll", None)
+    } else if api_lower.contains("opengl") {
+        ("opengl32.dll", None)
     } else {
-        "dxgi.dll"
+        ("dxgi.dll", None)
     };
 
-    remove_stale_proxy_hooks(&mod_root, hook_dll, &mut log);
+    let mut active_hooks = vec![hook_dll];
+    if let Some(dg_name) = dg_hook_name {
+        active_hooks.push(dg_name);
+    }
+    remove_stale_proxy_hooks(&mod_root, &active_hooks, &mut log);
 
     // If game is Vulkan or contains any Vulkan executables, register the Vulkan implicit layer
     let has_vulkan_target = opts.api.to_lowercase().contains("vulkan")
@@ -1494,18 +1680,78 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         }
     }
 
-    // 1. Deploy ReShade64.dll as hook DLL
-    if let Some(reshade_src) = &payloads.reshade64_dll {
+    // Deploy dgVoodoo wrapper if active
+    if use_dgvoodoo {
+        if let Some(dg) = &payloads.dgvoodoo {
+            let dg_target = dg_hook_name.unwrap_or("d3d9.dll");
+            let dg_src = if dg_target == "d3d8.dll" && dg.d3d8_x86.is_some() {
+                dg.d3d8_x86.as_ref().unwrap()
+            } else if bitness == 32 {
+                &dg.d3d9_x86
+            } else {
+                &dg.d3d9_x64
+            };
+
+            let dest_dg = mod_root.join(dg_target);
+            track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, dg_src, &dest_dg, "dgvoodoo", &mut log)
+                .map_err(|e| format!("Failed to deploy dgVoodoo {}: {}", dg_target, e))?;
+            log.push(format!("[DGVOODOO] Deployed dgVoodoo2 ({}) as {} for D3D -> D3D11 translation", if bitness == 32 { "x86" } else { "x64" }, dg_target));
+
+            let base_conf = fs::read_to_string(&dg.conf).unwrap_or_default();
+            let conf_content = configure_dgvoodoo_conf(&base_conf);
+            let dest_conf = mod_root.join("dgVoodoo.conf");
+            track_and_write(&mut manifest, &opts.game_dir, &backup_dir, &dest_conf, &conf_content, "config", &mut log)
+                .map_err(|e| format!("Failed to write dgVoodoo.conf: {}", e))?;
+            log.push("[DGVOODOO] Configured dgVoodoo.conf (watermark brief display, VRAM=2048MB, pass-through disabled)".to_string());
+        }
+    }
+
+    // If target is 32-bit and not Large Address Aware (LAA), back up the original vanilla executable and enable LAA (4GB patch)
+    if bitness == 32 && opts.exe_path.is_file() {
+        if !crate::core::pe::is_large_address_aware(&opts.exe_path) {
+            let exe_rel = opts.exe_path.strip_prefix(&opts.game_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| opts.exe_path.file_name().unwrap_or_default().to_string_lossy().to_string());
+            let backup_exe_target = backup_dir.join(&exe_rel);
+            if let Some(parent) = backup_exe_target.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if fs::copy(&opts.exe_path, &backup_exe_target).is_ok() {
+                if !manifest.replaced.iter().any(|r| r.rel == exe_rel) {
+                    manifest.replaced.push(crate::core::journal::ManifestItem {
+                        rel: exe_rel.clone(),
+                        old_hash: None,
+                        kind: Some("executable_vanilla".to_string()),
+                    });
+                    log.push(format!("[BACKUP] Saved vanilla 32-bit executable to backup before 4GB patch: {}", exe_rel));
+                }
+                match crate::core::pe::set_large_address_aware(&opts.exe_path, true) {
+                    Ok(true) => log.push(format!("[LAA] Applied 4GB Patch (Large Address Aware) to {}", opts.exe_path.file_name().unwrap_or_default().to_string_lossy())),
+                    Ok(false) => {},
+                    Err(e) => log.push(format!("[WARN] Could not set Large Address Aware on executable: {}", e)),
+                }
+            }
+        }
+    }
+
+    // 1. Deploy ReShade (32-bit or 64-bit) as hook DLL (dxgi.dll when dgVoodoo is used)
+    let reshade_payload = if bitness == 32 {
+        payloads.reshade32_dll.as_ref()
+    } else {
+        payloads.reshade64_dll.as_ref()
+    };
+
+    if let Some(reshade_src) = reshade_payload {
         if reshade_src.is_file() {
             let dest_hook = mod_root.join(hook_dll);
             track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, reshade_src, &dest_hook, "reshade", &mut log)
                 .map_err(|e| format!("Failed to deploy {}: {}", hook_dll, e))?;
-            log.push(format!("[FEEDER] ReShade deployed as {} for frame/depth buffer capture", hook_dll));
+            log.push(format!("[FEEDER] ReShade ({}x) deployed as {} for frame/depth buffer capture", bitness, hook_dll));
         } else {
-            return Err(format!("ReShade64.dll payload file missing: {}", reshade_src.display()));
+            return Err(format!("ReShade{} payload file missing: {}", if bitness == 32 { "32.dll" } else { "64.dll" }, reshade_src.display()));
         }
     } else {
-        return Err("ReShade64.dll payload not found on system".to_string());
+        return Err(format!("ReShade{}.dll payload not found on system. Please verify component payloads.", if bitness == 32 { "32" } else { "64" }));
     }
 
     let state = crate::core::state::load_state();
@@ -1515,20 +1761,21 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
     let mut deployed_addon_stems: Vec<String> = Vec::new();
 
     // 2. Deploy dlss5-feed addon & cfg if available
-    let bitness = crate::core::pe::inspect_pe(&opts.exe_path).map(|p| p.bitness).unwrap_or(64);
     if let Some(fc) = &payloads.feeder_components {
-            let addon_src = if bitness == 32 {
-                fc.addon32.as_ref().unwrap_or(&fc.addon64)
-            } else {
-                &fc.addon64
-            };
-            if addon_src.is_file() {
+        let addon_src = if bitness == 32 {
+            fc.addon32.as_ref()
+        } else {
+            Some(&fc.addon64)
+        };
+        if let Some(src) = addon_src {
+            if src.is_file() {
                 let dest = mod_root.join(if bitness == 32 { "dlss5-feed.addon32" } else { "dlss5-feed.addon64" });
-                track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, addon_src, &dest, "feeder", &mut log)
+                track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, src, &dest, "feeder", &mut log)
                     .map_err(|e| format!("Failed to copy dlss5-feed addon: {}", e))?;
                 deployed_addon_stems.push("dlss5-feed".to_string());
-                log.push("[FEEDER] dlss5-feed addon deployed for frame, depth & optical flow capture".to_string());
+                log.push(format!("[FEEDER] dlss5-feed addon ({}x) deployed for frame, depth & optical flow capture", bitness));
             }
+        }
 
             // Deploy reshade-shaders tree
             if fc.shader_dir.is_dir() {
@@ -1562,7 +1809,9 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         .map_err(|e| format!("Failed to write ReShadePreset.ini: {}", e))?;
 
     // 3. Deploy RenoDX DLSS 5 Engine & Neural Rendering runtime
-    if renodx_active {
+    // NOTE: renodx-dlss5.addon64 and nvngx_dlssnr.dll are strictly 64-bit binaries.
+    // They are only deployed when the game is 64-bit to prevent invalid PE image loader errors.
+    if renodx_active && bitness == 64 {
         if let Some(renodx_src) = &payloads.renodx_dlss5_addon {
             if renodx_src.is_file() {
                 let dest = mod_root.join("renodx-dlss5.addon64");
@@ -1606,6 +1855,66 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
                     track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, dlss_src, &target_path, "runtime", &mut log)
                         .map_err(|e| format!("Failed to deploy/upgrade nvngx_dlss.dll: {}", e))?;
                     log.push("[RUNTIME] Deployed/upgraded modern nvngx_dlss.dll for Streamline Feeder Super Sampling".to_string());
+                }
+            }
+        }
+    }
+
+    // 3b. For 32-bit games, assemble the host64 companion directory so 32-bit dlss5-feed can drive 64-bit Neural Rendering
+    if bitness == 32 {
+        if let Some(fc) = &payloads.feeder_components {
+            if let Some(host64_exe) = &fc.host64 {
+                if host64_exe.is_file() {
+                    let host64_dir = mod_root.join("host64");
+
+                    // 1. Copy host64 executable
+                    let dest_host_exe = host64_dir.join("dlss5-feed-host64.exe");
+                    track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, host64_exe, &dest_host_exe, "feeder-host", &mut log)
+                        .map_err(|e| format!("Failed to copy dlss5-feed-host64.exe: {}", e))?;
+
+                    // 2. Deploy 64-bit ReShade as dxgi.dll in host64/
+                    if let Some(reshade64) = &payloads.reshade64_dll {
+                        if reshade64.is_file() {
+                            let dest_r64 = host64_dir.join("dxgi.dll");
+                            track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, reshade64, &dest_r64, "feeder-host-reshade", &mut log)
+                                .map_err(|e| format!("Failed to copy ReShade64 to host64/dxgi.dll: {}", e))?;
+                        }
+                    }
+
+                    // 3. Deploy 64-bit RenoDX DLSS5 & DLSS-NR runtimes in host64/
+                    if renodx_active {
+                        if let Some(renodx) = &payloads.renodx_dlss5_addon {
+                            if renodx.is_file() {
+                                let dest_renodx = host64_dir.join("renodx-dlss5.addon64");
+                                track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, renodx, &dest_renodx, "feeder-host-addon", &mut log)
+                                    .map_err(|e| format!("Failed to copy renodx-dlss5.addon64 to host64: {}", e))?;
+                            }
+                        }
+                        if let Some(dlssnr) = &payloads.nvngx_dlssnr_dll {
+                            if dlssnr.is_file() {
+                                let dest_dlssnr = host64_dir.join("nvngx_dlssnr.dll");
+                                track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, dlssnr, &dest_dlssnr, "feeder-host-runtime", &mut log)
+                                    .map_err(|e| format!("Failed to copy nvngx_dlssnr.dll to host64: {}", e))?;
+                            }
+                        }
+                    }
+
+                    // 4. Deploy modern nvngx_dlss.dll in host64/
+                    if let Some(dlss) = &payloads.nvngx_dlss_dll {
+                        if dlss.is_file() {
+                            let dest_dlss = host64_dir.join("nvngx_dlss.dll");
+                            track_and_copy(&mut manifest, &opts.game_dir, &backup_dir, dlss, &dest_dlss, "feeder-host-runtime", &mut log)
+                                .map_err(|e| format!("Failed to copy nvngx_dlss.dll to host64: {}", e))?;
+                        }
+                    }
+
+                    // 5. Deploy host64 ReShade.ini
+                    let host_reshade_ini = configure_host64_reshade_ini();
+                    let host_ini_path = host64_dir.join("ReShade.ini");
+                    track_and_write(&mut manifest, &opts.game_dir, &backup_dir, &host_ini_path, &host_reshade_ini, "config", &mut log)
+                        .map_err(|e| format!("Failed to write host64/ReShade.ini: {}", e))?;
+
+                    log.push("[HOST64] Assembled 64-bit Neural Host bridge (host64/) for 32-bit game".to_string());
                 }
             }
         }
@@ -1739,6 +2048,28 @@ pub fn deploy_feeder(opts: &DeployOptions) -> Result<DeployResult, String> {
         }?;
         payloads.feeder_components = Some(fc);
     }
+
+    let api_lower = opts.api.to_lowercase();
+    let is_legacy_dx = api_lower.contains('9') || api_lower.contains('8') || api_lower.contains("d3d9") || api_lower.contains("d3d8");
+    if is_legacy_dx && payloads.dgvoodoo.is_none() {
+        let mut download_log = Vec::new();
+        let dg = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(crate::core::downloader::ensure_dgvoodoo_components(&mut download_log))
+                })
+            }
+            Err(_) => {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("Tokio runtime error: {}", e))?;
+                rt.block_on(crate::core::downloader::ensure_dgvoodoo_components(&mut download_log))
+            }
+        }?;
+        payloads.dgvoodoo = Some(dg);
+    }
+
     deploy_feeder_with_bundle(opts, &payloads)
 }
 
@@ -1755,6 +2086,32 @@ mod tests {
         assert!(updated.contains("RunBeforeSR=true"));
         let updated2 = set_ini(&updated, "DlssNr", "Passes", "3");
         assert!(updated2.contains("Passes=3"));
+    }
+
+    #[test]
+    fn test_configure_dgvoodoo_conf_sets_display_duration_and_preserves_sections() {
+        let sample = r#"[General]
+OutputAPI = bestavailable
+DisableAndPassThru=false
+
+[GeneralExt]
+WatermarkDisplayDuration = 0
+
+[Glide]
+3DfxWatermark = false
+3DfxSplashScreen = true
+
+[DirectX]
+DisableAndPassThru = false
+dgVoodooWatermark = false
+"#;
+        let configured = configure_dgvoodoo_conf(sample);
+        assert!(configured.contains("WatermarkDisplayDuration = 3"), "Must set WatermarkDisplayDuration to 3");
+        assert!(configured.contains("dgVoodooWatermark = true"), "Must enable dgVoodooWatermark for temporary 3s confirmation");
+        assert!(configured.contains("3DfxWatermark = true"), "Must enable 3DfxWatermark for temporary 3s confirmation");
+        assert!(configured.contains("3DfxSplashScreen = false"), "Must disable 3DfxSplashScreen intro animation");
+        assert!(configured.contains("VRAM = 2048") || configured.contains("VRAM=2048"), "Must configure VRAM to 2048MB for high resolutions");
+        assert!(!configured.contains("[General]\r\nOutputAPI = bestavailable\r\nDisableAndPassThru=false"), "Must strip invalid DisableAndPassThru from [General]");
     }
 
     #[test]
@@ -2241,6 +2598,9 @@ mod tests {
             let reshade = temp.join("ReShade64.dll");
             fs::write(&reshade, b"MOCK_RESHADE_PE_BYTES").unwrap();
 
+            let reshade32 = temp.join("ReShade32.dll");
+            fs::write(&reshade32, b"MOCK_RESHADE32_PE_BYTES").unwrap();
+
             let renodx = temp.join("renodx-dlss5.addon64");
             fs::write(&renodx, b"MOCK_RENODX_PE_BYTES").unwrap();
 
@@ -2267,12 +2627,36 @@ mod tests {
             let mock_addon64 = feeder_dir.join("dlss5-feed.addon64");
             fs::write(&mock_addon64, b"MOCK_FEEDER_ADDON_64").unwrap();
 
+            let mock_addon32 = feeder_dir.join("dlss5-feed.addon32");
+            fs::write(&mock_addon32, b"MOCK_FEEDER_ADDON_32").unwrap();
+
+            let mock_host64 = feeder_dir.join("dlss5-feed-host64.exe");
+            fs::write(&mock_host64, b"MOCK_FEEDER_HOST64_EXE").unwrap();
+
             let mock_feeder = crate::core::downloader::FeederComponents {
                 addon64: mock_addon64,
-                addon32: None,
-                host64: None,
+                addon32: Some(mock_addon32),
+                host64: Some(mock_host64),
                 shader_dir: feeder_shaders,
                 vk_layer_dir: None,
+            };
+
+            let mock_dgvoodoo_dir = temp.join("mock_dgvoodoo");
+            fs::create_dir_all(&mock_dgvoodoo_dir).unwrap();
+            let mock_d3d9_x86 = mock_dgvoodoo_dir.join("D3D9_x86.dll");
+            let mock_d3d9_x64 = mock_dgvoodoo_dir.join("D3D9_x64.dll");
+            let mock_d3d8_x86 = mock_dgvoodoo_dir.join("D3D8_x86.dll");
+            let mock_dg_conf = mock_dgvoodoo_dir.join("dgVoodoo.conf");
+            fs::write(&mock_d3d9_x86, b"MOCK_DGVOODOO_D3D9_X86").unwrap();
+            fs::write(&mock_d3d9_x64, b"MOCK_DGVOODOO_D3D9_X64").unwrap();
+            fs::write(&mock_d3d8_x86, b"MOCK_DGVOODOO_D3D8_X86").unwrap();
+            fs::write(&mock_dg_conf, b"[DirectX]\ndgVoodooWatermark = true\n[General]\nDisableAndPassThru = true\n").unwrap();
+
+            let mock_dgvoodoo = crate::core::downloader::DgVoodooComponents {
+                d3d9_x86: mock_d3d9_x86,
+                d3d9_x64: mock_d3d9_x64,
+                d3d8_x86: Some(mock_d3d8_x86),
+                conf: mock_dg_conf,
             };
 
             let dlss_dll = temp.join("nvngx_dlss.dll");
@@ -2287,10 +2671,12 @@ mod tests {
                 nvngx_snippet_dll: Some(snippet),
                 rtxmfg_dll: Some(rtxmfg),
                 reshade64_dll: Some(reshade),
+                reshade32_dll: Some(reshade32),
                 renodx_dlss5_addon: Some(renodx),
                 renodx_mfgunlock_addon: Some(mfgunlock),
                 feeder_components: Some(mock_feeder),
                 streamline_dir: Some(streamline_dir),
+                dgvoodoo: Some(mock_dgvoodoo),
             }
         }
     }
@@ -3180,6 +3566,252 @@ mod tests {
         let restored = crate::core::journal::restore_game(&game_dir).expect("restore must succeed");
         assert!(restored);
         assert_eq!(fs::read(&genuine_dxgi).unwrap(), b"GENUINE_GAME_DXGI_CONTENT_12345", "Original vanilla file must be completely preserved across multiple hot-swaps");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn create_mock_pe32() -> Vec<u8> {
+        let mut data = vec![0u8; 1024];
+        data[0..2].copy_from_slice(b"MZ");
+        data[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        data[0x80..0x84].copy_from_slice(b"PE\0\0");
+        data[0x84..0x86].copy_from_slice(&0x014Cu16.to_le_bytes());
+        data[0x94..0x96].copy_from_slice(&0xE0u16.to_le_bytes());
+        data[0x98..0x9A].copy_from_slice(&0x010Bu16.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn test_feeder_route_32bit_deploys_reshade32_and_addon32_fallback_without_dgvoodoo() {
+        let _state_lock = STATE_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = std::env::temp_dir().join(format!("test_feeder_32bit_fallback_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let game_dir = temp_dir.join("PsychonautsGame");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let exe_path = game_dir.join("Psychonauts.exe");
+        fs::write(&exe_path, create_mock_pe32()).unwrap();
+
+        let pe_info = crate::core::pe::inspect_pe(&exe_path).expect("Mock PE32 must be valid");
+        assert_eq!(pe_info.bitness, 32);
+
+        let mut payloads = PayloadBundle::create_mock(&temp_dir.join("payloads"));
+        payloads.dgvoodoo = None;
+
+        let opts = DeployOptions {
+            game_name: Some("Psychonauts".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 9".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+        };
+
+        let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 32-bit must succeed");
+        assert!(res.success);
+
+        // 1. Positive assertions: 32-bit hook DLL (d3d9.dll) + 32-bit feeder addon + shaders + configs
+        let d3d9_path = game_dir.join("d3d9.dll");
+        assert!(d3d9_path.exists(), "d3d9.dll must be deployed");
+        assert_eq!(fs::read(&d3d9_path).unwrap(), b"MOCK_RESHADE32_PE_BYTES", "d3d9.dll must be ReShade32.dll in fallback mode");
+
+        assert!(game_dir.join("dlss5-feed.addon32").exists(), "dlss5-feed.addon32 must be deployed for 32-bit process");
+        assert!(game_dir.join("dlss5-feed.cfg").exists(), "dlss5-feed.cfg must be deployed");
+        assert!(game_dir.join("ReShade.ini").exists(), "ReShade.ini must be deployed");
+        assert!(game_dir.join("ReShadePreset.ini").exists(), "ReShadePreset.ini must be deployed");
+        assert!(game_dir.join("reshade-shaders").exists(), "reshade-shaders must be deployed");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_feeder_route_32bit_deploys_dgvoodoo_and_host64_bridge() {
+        let _state_lock = STATE_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = std::env::temp_dir().join(format!("test_feeder_dgvoodoo_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let game_dir = temp_dir.join("PsychonautsGame");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let exe_path = game_dir.join("Psychonauts.exe");
+        fs::write(&exe_path, create_mock_pe32()).unwrap();
+
+        let pe_info = crate::core::pe::inspect_pe(&exe_path).expect("Mock PE32 must be valid");
+        assert_eq!(pe_info.bitness, 32);
+
+        let payloads = PayloadBundle::create_mock(&temp_dir.join("payloads"));
+
+        let opts = DeployOptions {
+            game_name: Some("Psychonauts".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 9".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+        };
+
+        let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 32-bit with dgVoodoo must succeed");
+        assert!(res.success);
+
+        // 1. dgVoodoo D3D9.dll deployed as d3d9.dll
+        let d3d9_path = game_dir.join("d3d9.dll");
+        assert!(d3d9_path.exists(), "d3d9.dll must be deployed");
+        assert_eq!(fs::read(&d3d9_path).unwrap(), b"MOCK_DGVOODOO_D3D9_X86", "d3d9.dll must be dgVoodoo x86");
+
+        // 2. dgVoodoo.conf deployed and configured (watermark brief 3s display, splash screen disabled)
+        let conf_path = game_dir.join("dgVoodoo.conf");
+        assert!(conf_path.exists(), "dgVoodoo.conf must be deployed");
+        let conf_str = fs::read_to_string(&conf_path).unwrap();
+        assert!(conf_str.contains("dgVoodooWatermark=true") || conf_str.contains("dgVoodooWatermark = true"));
+        assert!(conf_str.contains("WatermarkDisplayDuration=3") || conf_str.contains("WatermarkDisplayDuration = 3"));
+        assert!(conf_str.contains("3DfxWatermark=true") || conf_str.contains("3DfxWatermark = true"));
+        assert!(conf_str.contains("3DfxSplashScreen=false") || conf_str.contains("3DfxSplashScreen = false"));
+        assert!(conf_str.contains("VRAM=2048") || conf_str.contains("VRAM = 2048"));
+
+        // 3. ReShade32 deployed as dxgi.dll
+        let dxgi_path = game_dir.join("dxgi.dll");
+        assert!(dxgi_path.exists(), "dxgi.dll must be deployed as ReShade hook");
+        assert_eq!(fs::read(&dxgi_path).unwrap(), b"MOCK_RESHADE32_PE_BYTES", "dxgi.dll must be ReShade32");
+
+        // 4. 32-bit Feeder add-on and shaders
+        assert!(game_dir.join("dlss5-feed.addon32").exists(), "dlss5-feed.addon32 must be deployed");
+        assert!(game_dir.join("dlss5-feed.cfg").exists(), "dlss5-feed.cfg must be deployed");
+        assert!(game_dir.join("ReShade.ini").exists(), "ReShade.ini must be deployed");
+        assert!(game_dir.join("ReShadePreset.ini").exists(), "ReShadePreset.ini must be deployed");
+        assert!(game_dir.join("reshade-shaders").exists(), "reshade-shaders must be deployed");
+
+        // 5. host64 neural bridge directory assembled
+        let host64_dir = game_dir.join("host64");
+        assert!(host64_dir.is_dir(), "host64/ directory must exist");
+        assert!(host64_dir.join("dlss5-feed-host64.exe").exists(), "host64/dlss5-feed-host64.exe must exist");
+        assert_eq!(fs::read(host64_dir.join("dlss5-feed-host64.exe")).unwrap(), b"MOCK_FEEDER_HOST64_EXE");
+        assert!(host64_dir.join("dxgi.dll").exists(), "host64/dxgi.dll (ReShade64) must exist");
+        assert_eq!(fs::read(host64_dir.join("dxgi.dll")).unwrap(), b"MOCK_RESHADE_PE_BYTES");
+        assert!(host64_dir.join("renodx-dlss5.addon64").exists(), "host64/renodx-dlss5.addon64 must exist");
+        assert!(host64_dir.join("nvngx_dlssnr.dll").exists(), "host64/nvngx_dlssnr.dll must exist");
+        assert!(host64_dir.join("nvngx_dlss.dll").exists(), "host64/nvngx_dlss.dll must exist");
+        assert!(host64_dir.join("ReShade.ini").exists(), "host64/ReShade.ini must exist");
+
+        // 6. Strict negative assertions in root: no 64-bit addons in 32-bit game root
+        assert!(!game_dir.join("renodx-dlss5.addon64").exists(), "renodx-dlss5.addon64 must NOT be in 32-bit game root");
+        assert!(!game_dir.join("nvngx_dlssnr.dll").exists(), "nvngx_dlssnr.dll must NOT be in 32-bit game root");
+        assert!(crate::core::pe::is_large_address_aware(&exe_path), "Target 32-bit executable must be patched with LAA (4GB patch)");
+
+        // 7. Verify restore cleanly purges all dgVoodoo, ReShade, and host64 files, and restores original executable
+        let restored = crate::core::journal::restore_game(&game_dir).expect("Restore must succeed");
+        assert!(restored, "Restore must report true");
+        assert!(!game_dir.join("d3d9.dll").exists(), "d3d9.dll must be removed on restore");
+        assert!(!game_dir.join("dgVoodoo.conf").exists(), "dgVoodoo.conf must be removed on restore");
+        assert!(!game_dir.join("dxgi.dll").exists(), "dxgi.dll must be removed on restore");
+        assert!(!game_dir.join("host64").exists(), "host64/ must be removed on restore");
+        assert!(!game_dir.join("dlss5-feed.addon32").exists(), "dlss5-feed.addon32 must be removed on restore");
+        assert!(!crate::core::pe::is_large_address_aware(&exe_path), "Target 32-bit executable must have original non-LAA restored from vanilla backup");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_feeder_route_d3d8_deploys_dgvoodoo_d3d8() {
+        let _state_lock = STATE_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = std::env::temp_dir().join(format!("test_feeder_d3d8_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let game_dir = temp_dir.join("LegacyD3D8Game");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let exe_path = game_dir.join("GameD3D8.exe");
+        fs::write(&exe_path, create_mock_pe32()).unwrap();
+
+        let payloads = PayloadBundle::create_mock(&temp_dir.join("payloads"));
+
+        let opts = DeployOptions {
+            game_name: Some("Legacy D3D8 Game".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 8".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+        };
+
+        let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for D3D8 must succeed");
+        assert!(res.success);
+
+        // d3d8.dll must be dgVoodoo D3D8
+        let d3d8_path = game_dir.join("d3d8.dll");
+        assert!(d3d8_path.exists(), "d3d8.dll must be deployed");
+        assert_eq!(fs::read(&d3d8_path).unwrap(), b"MOCK_DGVOODOO_D3D8_X86", "d3d8.dll must be dgVoodoo D3D8");
+
+        // dxgi.dll must be ReShade32
+        let dxgi_path = game_dir.join("dxgi.dll");
+        assert!(dxgi_path.exists(), "dxgi.dll must be deployed");
+        assert_eq!(fs::read(&dxgi_path).unwrap(), b"MOCK_RESHADE32_PE_BYTES");
+
+        // Clean restore
+        let restored = crate::core::journal::restore_game(&game_dir).expect("Restore must succeed");
+        assert!(restored);
+        assert!(!game_dir.join("d3d8.dll").exists());
+        assert!(!game_dir.join("dxgi.dll").exists());
+        assert!(!game_dir.join("dgVoodoo.conf").exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn create_mock_pe64() -> Vec<u8> {
+        let mut data = vec![0u8; 1024];
+        data[0..2].copy_from_slice(b"MZ");
+        data[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        data[0x80..0x84].copy_from_slice(b"PE\0\0");
+        data[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes()); // IMAGE_FILE_MACHINE_AMD64
+        data[0x94..0x96].copy_from_slice(&0xF0u16.to_le_bytes()); // SizeOfOptionalHeader
+        data[0x98..0x9A].copy_from_slice(&0x020Bu16.to_le_bytes()); // PE32+ (64-bit) magic
+        data
+    }
+
+    #[test]
+    fn test_feeder_route_64bit_deploys_reshade64_and_addon64() {
+        let _state_lock = STATE_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = std::env::temp_dir().join(format!("test_feeder_64bit_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let game_dir = temp_dir.join("CyberpunkGame");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let exe_path = game_dir.join("Cyberpunk2077.exe");
+        fs::write(&exe_path, create_mock_pe64()).unwrap();
+
+        let pe_info = crate::core::pe::inspect_pe(&exe_path).expect("Mock PE64 must be valid");
+        assert_eq!(pe_info.bitness, 64);
+
+        let payloads = PayloadBundle::create_mock(&temp_dir.join("payloads"));
+
+        let opts = DeployOptions {
+            game_name: Some("Cyberpunk 2077".to_string()),
+            game_dir: game_dir.clone(),
+            exe_path: exe_path.clone(),
+            api: "DirectX 12".to_string(),
+            pre_sr: false,
+            passes: 1,
+            mfg_unlock: false,
+            mfg_multiplier: 1,
+        };
+
+        let res = deploy_feeder_with_bundle(&opts, &payloads).expect("deploy_feeder_with_bundle for 64-bit must succeed");
+        assert!(res.success);
+
+        // Positive assertions: 64-bit hook DLL (dxgi.dll) + 64-bit feeder addon + renodx-dlss5 + nvngx_dlssnr
+        let dxgi_path = game_dir.join("dxgi.dll");
+        assert!(dxgi_path.exists(), "dxgi.dll must be deployed");
+        assert_eq!(fs::read(&dxgi_path).unwrap(), b"MOCK_RESHADE_PE_BYTES", "dxgi.dll must be ReShade64.dll");
+
+        assert!(game_dir.join("dlss5-feed.addon64").exists(), "dlss5-feed.addon64 must be deployed for 64-bit process");
+        assert!(game_dir.join("renodx-dlss5.addon64").exists(), "renodx-dlss5.addon64 must be deployed in 64-bit game");
+        assert!(game_dir.join("nvngx_dlssnr.dll").exists(), "nvngx_dlssnr.dll must be deployed in 64-bit game");
+        assert!(game_dir.join("nvngx_dlss.dll").exists(), "nvngx_dlss.dll must be deployed in 64-bit game");
+
+        // Negative assertions: 32-bit addon must not be deployed in 64-bit game
+        assert!(!game_dir.join("dlss5-feed.addon32").exists(), "dlss5-feed.addon32 must NOT be deployed in 64-bit game");
+
+        let manifest = crate::core::journal::read_manifest(&game_dir).expect("Active manifest must exist");
+        assert_eq!(manifest.game.as_ref().and_then(|g| g.bitness), Some(64), "Manifest must record 64-bit architecture");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

@@ -57,8 +57,8 @@ jobs:
         with:
           name: dlss-studio-windows-x64
           path: |
-            target/release/dlss-studio-portable.exe
-            target/release/dlss-studio-setup.exe
+            target/release/dlss-studio-v*-portable.exe
+            target/release/dlss-studio-v*-setup.exe
           if-no-files-found: error
 
       - name: Prepare Release Notes & Commit Comments
@@ -116,8 +116,8 @@ jobs:
             fi
 
             echo "" >> generated_release_notes.md
-            echo "- **\`dlss-studio-setup.exe\`**: Standalone Setup / Installer (Recommended) — Modern native Rust setup wizard with configurable install and data storage locations, Start Menu & Desktop shortcuts, Windows Add/Remove Programs registration" >> generated_release_notes.md
-            echo "- **\`dlss-studio-portable.exe\`**: Portable Executable — Standalone self-contained 64-bit Windows executable (includes embedded companion overlay add-on)" >> generated_release_notes.md
+            echo "- **\`dlss-studio-v${CARGO_VER}-setup.exe\`**: Standalone Setup / Installer (Recommended) — Modern native Rust setup wizard with configurable install and data storage locations, Start Menu & Desktop shortcuts, Windows Add/Remove Programs registration" >> generated_release_notes.md
+            echo "- **\`dlss-studio-v${CARGO_VER}-portable.exe\`**: Portable Executable — Standalone self-contained 64-bit Windows executable (includes embedded companion overlay add-on)" >> generated_release_notes.md
           fi
 
       - name: Publish GitHub Release
@@ -129,8 +129,8 @@ jobs:
           name: ${{ steps.release_meta.outputs.title }}
           body_path: ${{ steps.release_meta.outputs.body_file }}
           files: |
-            target/release/dlss-studio-portable.exe
-            target/release/dlss-studio-setup.exe
+            target/release/dlss-studio-v*-portable.exe
+            target/release/dlss-studio-v*-setup.exe
           generate_release_notes: true
           make_latest: "true"
           draft: ${{ github.event.inputs.draft == 'true' }}
