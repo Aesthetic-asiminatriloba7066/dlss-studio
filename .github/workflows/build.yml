@@ -135,16 +135,20 @@ jobs:
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ steps.release_meta.outputs.title }}
-          body_path: ${{ steps.release_meta.outputs.body_file }}
-          files: |
-            target/release/dlss-studio-v*-portable.exe
-            target/release/dlss-studio-v*-setup.exe
-          generate_release_notes: true
-          make_latest: "true"
-          draft: ${{ github.event.inputs.draft == 'true' }}
-          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release_meta.outputs.tag }}"
+          TITLE="${{ steps.release_meta.outputs.title }}"
+          BODY_FILE="${{ steps.release_meta.outputs.body_file }}"
+
+          # Delete any existing draft/failed release for this tag if present
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          gh release create "$TAG" \
+            target/release/dlss-studio-v*-setup.exe \
+            target/release/dlss-studio-v*-portable.exe \
+            --title "$TITLE" \
+            --notes-file "$BODY_FILE" \
+            --latest
