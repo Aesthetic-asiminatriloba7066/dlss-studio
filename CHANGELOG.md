@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-09-17
+ 
+### Fixed
+- **Dedicated Interactive Uninstaller & Clean Directory Purge**: Added dedicated `UninstallApp` UI with confirmation screen, live progress bar, and completion screen. Implemented temp trampoline worker pattern in `%TEMP%` to cleanly delete the entire installation folder without Windows file locks. Checkbox to clear `%APPDATA%\dlss-5-studio` defaults to checked (game backups in game folders remain untouched).
+- **ReShade Framework Suite & Feeder Verification**: Bundled `DrawText.fxh`, `FontAtlas.png`, and the slim ReShade framework suite into `feeder-shaders\` so `Verify-DLSS5Feeder.ps1` checks out with 0 errors and 0 warnings.
+- **WebView2 User Data Directory**: Routed setup and uninstaller WebView2 data directories to `%TEMP%`, completely preventing `.WebView2` folders from cluttering installation and release folders.
+- **Configuration & Setup Utility Filtering**: Expanded `is_installer_or_helper` to filter non-game executables (`*config.exe`, `*settings.exe`, `*setup.exe`, `*activation*.exe`, `*autorun*.exe`, `*registration*.exe`, `*support*.exe`) from game directories and executable selection dropdowns (e.g., `MassEffect2Config.exe`).
+- **DirectX 9 vs DirectX 10 UE3 Detection**: Fixed false positive DirectX 10 / DirectX 11 detection on legacy Unreal Engine 3 games (such as *Mass Effect 2* `ME2Game.exe`) by prioritizing active Direct3D 9 imports and PE markers over dormant D3D10 engine markers.
+- **Relic Modular Rendering Recognition**: Supported modular render libraries (such as *Warhammer 40,000: Dawn of War Definitive Edition*'s `spDx9.dll`) while preventing auxiliary video player DXGI helpers from triggering false positive DirectX 11 detection.
+- **"Undetected" Fallback Labeling**: Replaced ambiguous `"DirectX 11"` fallback labeling with `"Undetected"` for executables lacking any 3D graphics imports, PE markers, or graphics sibling modules.
+
+### Changed
+- **Candidate Scoring Algorithm**: Prioritized executables with verified graphics APIs (+5,000 pts) and substantial PE code size (> 5 MB, +4,000 pts) while penalizing small launcher stubs (< 1 MB without graphics calls, -5,000 pts).
+
+---
+
+## [1.0.2] - 2026-09-16
+
+### Added
+- **Legacy Pre-DirectX 10 (DirectX 8 & 9) dgVoodoo 2 Interop**: Automated translation for older games to modern D3D11 swapchains for the DLSS 5 Feeder pipeline.
+- **32-Bit Large Address Aware (LAA) Inspection & Toggle**: Safe LAA inspection and toggling for 32-bit executables, unlocking up to 4 GB address space.
+- **Steam CDN Artwork Resolution**: Automatic artwork resolution and banner downloads for manually added games and custom folders, with smart title inference for nested subfolders.
+
+---
+
 ## [1.0.1] - 2026-09-14
 
 ### Fixed

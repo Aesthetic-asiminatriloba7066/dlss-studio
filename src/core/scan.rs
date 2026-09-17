@@ -155,6 +155,8 @@ pub struct GameEntry {
     pub files: Vec<GameFileItem>,
     #[serde(default)]
     pub available_exes: Vec<GameExeOption>,
+    #[serde(default)]
+    pub nr_style: usize,
 }
 
 impl GameEntry {
@@ -226,6 +228,12 @@ pub fn is_installer_or_helper(name: &str) -> bool {
         || lower.contains("diagnostics") || lower.contains("benchmark")
         || lower.contains("prelauncher")
         || lower.contains("launcher")
+        || lower.ends_with("config.exe") || lower.ends_with("_config.exe") || lower.ends_with("-config.exe") || lower == "config.exe" || lower.contains("configuration")
+        || lower.ends_with("settings.exe") || lower.ends_with("_settings.exe") || lower.ends_with("-settings.exe") || lower == "settings.exe"
+        || lower.ends_with("setup.exe") || lower.ends_with("_setup.exe") || lower.ends_with("-setup.exe") || lower == "setup.exe"
+        || lower.contains("activation") || lower.starts_with("autorun") || lower == "autorun.exe"
+        || lower.contains("registration") || lower == "register.exe"
+        || lower.ends_with("support.exe") || lower.ends_with("_support.exe")
     {
         return true;
     }
@@ -324,14 +332,14 @@ pub fn api_from_names(imports: &[String]) -> Option<String> {
     if has("d3d11.dll") {
         return Some("DirectX 11".to_string());
     }
+    if has("d3d9.dll") {
+        return Some("DirectX 9".to_string());
+    }
     if has("d3d10.dll") || has("d3d10_1.dll") {
         return Some("DirectX 10".to_string());
     }
     if has("dxgi.dll") {
         return Some("DirectX (DXGI)".to_string());
-    }
-    if has("d3d9.dll") {
-        return Some("DirectX 9".to_string());
     }
     if has("d3d8.dll") {
         return Some("DirectX 8".to_string());
@@ -343,7 +351,7 @@ pub fn api_from_markers(path: &Path) -> Option<String> {
     let markers = &[
         "D3D12CreateDevice", "D3D12SDKPath", "D3D12SDKVersion",
         "D3D11CreateDevice", "D3D10CreateDevice",
-        "Direct3DCreate9", "Direct3DCreate8", "CreateDXGIFactory", "vkCreateInstance", "wglCreateContext"
+        "Direct3DCreate9", "Direct3DCreate9Ex", "Direct3DCreate8", "CreateDXGIFactory", "vkCreateInstance", "wglCreateContext"
     ];
     let found = find_markers(path, markers);
     if found.iter().any(|m| m == "D3D12CreateDevice" || m == "D3D12SDKPath" || m == "D3D12SDKVersion") {
@@ -355,14 +363,14 @@ pub fn api_from_markers(path: &Path) -> Option<String> {
     if found.iter().any(|m| m == "D3D11CreateDevice") {
         return Some("DirectX 11".to_string());
     }
+    if found.iter().any(|m| m == "Direct3DCreate9" || m == "Direct3DCreate9Ex") {
+        return Some("DirectX 9".to_string());
+    }
     if found.iter().any(|m| m == "D3D10CreateDevice") {
         return Some("DirectX 10".to_string());
     }
     if found.iter().any(|m| m == "CreateDXGIFactory") {
         return Some("DirectX (DXGI)".to_string());
-    }
-    if found.iter().any(|m| m == "Direct3DCreate9") {
-        return Some("DirectX 9".to_string());
     }
     if found.iter().any(|m| m == "Direct3DCreate8") {
         return Some("DirectX 8".to_string());
@@ -430,6 +438,12 @@ fn detect_sibling_api(dir: &Path) -> Option<String> {
             if fname.contains("dx11") || fname.contains("d3d11") {
                 return Some("DirectX 11".to_string());
             }
+            if fname.contains("spdx9") || fname.contains("graphicsdx9") || fname.starts_with("dx9") {
+                return Some("DirectX 9".to_string());
+            }
+            if fname.contains("dx8") || fname.contains("d3d8") {
+                return Some("DirectX 8".to_string());
+            }
         }
     }
     None
@@ -475,30 +489,43 @@ pub fn detect_api(path: &Path, imports: &[String]) -> Option<String> {
         return Some("OpenGL".to_string());
     }
     if let Some(parent) = path.parent() {
-        // Check imported sibling DLLs (Control's d3d_rmdwin10_f.dll, Ren'Py's librenpython.dll)
-        // Skip generic third-party middleware (SDL, Bink, audio engines, upscalers, store SDKs)
+        // Check imported sibling DLLs (Control's d3d_rmdwin10_f.dll, Ren'Py's librenpython.dll, Relic's spdx9.dll)
+        // Skip generic third-party middleware (SDL, Bink, audio engines, upscalers, store SDKs, crash reporters, webviews)
+        let mut fallback_dxgi = false;
         for name in imports.iter().take(80) {
             let n_lower = name.to_lowercase();
             if n_lower.starts_with("sdl") || n_lower.starts_with("bink") || n_lower.starts_with("fmod") 
                 || n_lower.starts_with("libxess") || n_lower.starts_with("nvngx") || n_lower.starts_with("amd_")
                 || n_lower.starts_with("galaxy") || n_lower.starts_with("discord") || n_lower.starts_with("steam")
-                || n_lower.starts_with("party") || n_lower.starts_with("playfab") {
+                || n_lower.starts_with("party") || n_lower.starts_with("playfab")
+                || n_lower.starts_with("crash") || n_lower.starts_with("breakpad") || n_lower.starts_with("sentry")
+                || n_lower.starts_with("bugsplat") || n_lower.starts_with("cef") || n_lower.starts_with("libcef")
+                || n_lower.starts_with("ffmpeg") || n_lower.starts_with("avcodec") || n_lower.starts_with("avformat")
+                || n_lower.starts_with("qt5") || n_lower.starts_with("qt6") || n_lower.starts_with("chrome_elf") {
                 continue;
             }
             let sib_path = parent.join(name);
             if sib_path.is_file() {
                 if let Some(sib_pe) = inspect_pe(&sib_path) {
                     if let Some(api) = api_from_names(&sib_pe.imports) {
-                        return Some(api);
+                        if api == "DirectX (DXGI)" {
+                            fallback_dxgi = true;
+                        } else {
+                            return Some(api);
+                        }
                     }
                     if let Some(api) = api_from_markers(&sib_path) {
-                        return Some(api);
+                        if api == "DirectX (DXGI)" {
+                            fallback_dxgi = true;
+                        } else {
+                            return Some(api);
+                        }
                     }
                 }
             }
         }
-        if let Some(api) = detect_sibling_api(parent) {
-            return Some(api);
+        if fallback_dxgi {
+            return Some("DirectX (DXGI)".to_string());
         }
     }
     None
@@ -661,6 +688,10 @@ fn playable_role_score(name: &str, rel: &str) -> i64 {
     if lower.contains("multiplayer") || lower.ends_with("mp.exe") || lower.contains("_mp") {
         score -= 400;
     }
+    // Boost Unreal Engine gameplay binaries (*game.exe)
+    if lower.ends_with("game.exe") {
+        score += 2000;
+    }
     // Deprioritize legacy 32-bit fallback executables when 64-bit binaries exist
     if lower.contains("-32") || lower.contains("_32") || lower.contains("32bit") || lower.contains("win32") {
         score -= 2000;
@@ -685,6 +716,19 @@ fn candidate_score(c: &Candidate, dir_name: &str) -> i64 {
     // Prefer executables closer to root directory
     if c.depth <= 1 {
         score += 3000;
+    }
+    // Reward executables with verified graphics APIs
+    let api_lower = c.api.to_lowercase();
+    if api_lower.contains("directx") || api_lower.contains("vulkan") || api_lower.contains("opengl") {
+        score += 5000;
+    }
+    // Boost significant game binary size (> 5MB)
+    if c.size > 5_000_000 {
+        score += 4000;
+    }
+    // Penalize small launcher stubs (< 1MB) that lack real graphics APIs
+    if c.size < 1_000_000 && !c.declared && !c.has_sibling_dlss {
+        score -= 5000;
     }
     // Boost executables matching the game folder name (e.g. BeingADIK.exe vs "Being a DIK")
     let norm_dir: String = dir_name.chars().filter(|ch| ch.is_alphanumeric()).flat_map(|ch| ch.to_lowercase()).collect();
@@ -857,6 +901,8 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
 
                 let detected_api = if let Some(ref pe) = pe_opt {
                     detect_api(path, &pe.imports)
+                } else if let Some(api) = detect_api(path, &[]) {
+                    Some(api)
                 } else if let Some(parent) = parent_dir {
                     detect_sibling_api(parent)
                 } else {
@@ -870,13 +916,13 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                             if let Some(renpy_api) = detect_renpy_api(parent) {
                                 renpy_api
                             } else if is_declared || depth <= 1 {
-                                "DirectX 11".to_string()
+                                "Undetected".to_string()
                             } else {
                                 println!("EXE REJECTED: {} took {:?}", path.display(), t_exe.elapsed());
                                 continue;
                             }
                         } else if is_declared || depth <= 1 {
-                            "DirectX 11".to_string()
+                            "Undetected".to_string()
                         } else {
                             println!("EXE REJECTED: {} took {:?}", path.display(), t_exe.elapsed());
                             continue;
@@ -950,7 +996,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
             let parent_dir = d.path.parent();
             let has_sibling_dlss = parent_dir.map(|p| p.join("nvngx_dlss.dll").exists()).unwrap_or(false);
             let sibling_api = parent_dir.and_then(detect_sibling_api);
-            let api = sibling_api.unwrap_or_else(|| "DirectX 11".to_string());
+            let api = sibling_api.unwrap_or_else(|| "Undetected".to_string());
             let is_dx12 = api == "DirectX 12";
 
             let pe_d = crate::core::pe::inspect_pe(&d.path);
@@ -1033,6 +1079,44 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         }
         if reshade_installed {
             break;
+        }
+    }
+
+    // Check NRStyle from ReShade.ini, host64/ReShade.ini, or OptiScaler.ini
+    let mut nr_style: usize = 0;
+    for s_dir in search_dirs.into_iter().flatten() {
+        let reshade_ini = s_dir.join("ReShade.ini");
+        if reshade_ini.is_file() {
+            if let Ok(text) = fs::read_to_string(&reshade_ini) {
+                if let Some(val) = crate::core::optiscaler::get_ini(&text, "RenoDX.DLSS5", "NRStyle") {
+                    if let Ok(parsed) = val.trim().parse::<usize>() {
+                        nr_style = parsed;
+                        break;
+                    }
+                }
+            }
+        }
+        let host_reshade = s_dir.join("host64").join("ReShade.ini");
+        if host_reshade.is_file() {
+            if let Ok(text) = fs::read_to_string(&host_reshade) {
+                if let Some(val) = crate::core::optiscaler::get_ini(&text, "RenoDX.DLSS5", "NRStyle") {
+                    if let Ok(parsed) = val.trim().parse::<usize>() {
+                        nr_style = parsed;
+                        break;
+                    }
+                }
+            }
+        }
+        let opti_ini = s_dir.join("OptiScaler.ini");
+        if opti_ini.is_file() {
+            if let Ok(text) = fs::read_to_string(&opti_ini) {
+                if let Some(val) = crate::core::optiscaler::get_ini(&text, "DlssNr", "Style") {
+                    if let Ok(parsed) = val.trim().parse::<usize>() {
+                        nr_style = parsed;
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -1189,6 +1273,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         installed_route,
         files,
         available_exes,
+        nr_style,
     })
 }
 
@@ -1209,7 +1294,7 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
             None
         };
         let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
-        let api = detected_api.unwrap_or_else(|| "DirectX 11".to_string());
+        let api = detected_api.unwrap_or_else(|| "Undetected".to_string());
         exes.push(GameExeOption {
             name: d.name.clone(),
             path: d.path.clone(),
@@ -1263,7 +1348,7 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
                     None
                 };
 
-                let api = detected_api.unwrap_or_else(|| "DirectX 11".to_string());
+                let api = detected_api.unwrap_or_else(|| "Undetected".to_string());
                 let rel = path.strip_prefix(dir)
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| entry.file_name().to_string_lossy().to_string());
@@ -1791,6 +1876,7 @@ mod tests {
                 files: Vec::new(),
                 available_exes: Vec::new(),
                 is_laa: true,
+                nr_style: 0,
             };
             assert!(!crate::core::install_routes::is_native_dlss_supported(&fake_bg3), "Vulkan game must NOT support Native DLSS (RenoDX)");
             assert!(fake_bg3.can_inject_fg, "BG3 Vulkan must support frame generation injection");
@@ -2265,6 +2351,104 @@ mod tests {
         let name_stem = infer_game_name(p_generic, exe_stub, None);
         assert_eq!(name_stem, "Random");
     }
+
+    #[test]
+    fn test_is_installer_or_helper_filters_config_and_settings() {
+        assert!(is_installer_or_helper("MassEffect2Config.exe"));
+        assert!(is_installer_or_helper("GameConfig.exe"));
+        assert!(is_installer_or_helper("Config.exe"));
+        assert!(is_installer_or_helper("GameSettings.exe"));
+        assert!(is_installer_or_helper("Settings.exe"));
+        assert!(is_installer_or_helper("Setup.exe"));
+        assert!(is_installer_or_helper("VideoSetup.exe"));
+        assert!(is_installer_or_helper("ActivationUI.exe"));
+        assert!(is_installer_or_helper("Autorun.exe"));
+        assert!(is_installer_or_helper("autorun.exe"));
+        assert!(is_installer_or_helper("Register.exe"));
+        assert!(is_installer_or_helper("Registration.exe"));
+        assert!(is_installer_or_helper("Support.exe"));
+
+        // True games must never be filtered
+        assert!(!is_installer_or_helper("ME2Game.exe"));
+        assert!(!is_installer_or_helper("W40k_gog.exe"));
+        assert!(!is_installer_or_helper("W40k.exe"));
+        assert!(!is_installer_or_helper("Dead Space.exe"));
+        assert!(!is_installer_or_helper("bg3.exe"));
+    }
+
+    #[test]
+    fn test_mass_effect_2_ue3_resolves_to_directx_9() {
+        let temp_dir = std::env::temp_dir().join(format!("test_me2_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let exe_path = temp_dir.join("ME2Game.exe");
+
+        // Inject Direct3DCreate9, D3D10CreateDevice, and CreateDXGIFactory markers
+        let mut bytes = vec![0u8; 8192];
+        bytes[100..116].copy_from_slice(b"Direct3DCreate9\0");
+        bytes[200..218].copy_from_slice(b"D3D10CreateDevice\0");
+        bytes[300..318].copy_from_slice(b"CreateDXGIFactory\0");
+        fs::write(&exe_path, &bytes).unwrap();
+
+        let api = detect_api(&exe_path, &["d3d9.dll".to_string()]);
+        assert_eq!(api, Some("DirectX 9".to_string()), "UE3 games with Direct3DCreate9 and dormant D3D10 markers must resolve to DirectX 9");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_dawn_of_war_spdx9_and_dxgi_helper_resolves_to_directx_9() {
+        let temp_dir = std::env::temp_dir().join(format!("test_dow_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let main_exe = temp_dir.join("W40k_gog.exe");
+        let spdx9_dll = temp_dir.join("spDx9.dll");
+        let helper_dll = temp_dir.join("RenderHelper.dll");
+
+        // Main exe has Direct3DCreate9 and CreateDXGIFactory
+        let mut main_bytes = vec![0u8; 4096];
+        main_bytes[100..116].copy_from_slice(b"Direct3DCreate9\0");
+        main_bytes[200..218].copy_from_slice(b"CreateDXGIFactory\0");
+        fs::write(&main_exe, &main_bytes).unwrap();
+
+        // spDx9.dll has Direct3DCreate9
+        let mut spdx9_bytes = vec![0u8; 4096];
+        spdx9_bytes[100..116].copy_from_slice(b"Direct3DCreate9\0");
+        fs::write(&spdx9_dll, &spdx9_bytes).unwrap();
+
+        // RenderHelper.dll has CreateDXGIFactory
+        let mut helper_bytes = vec![0u8; 4096];
+        helper_bytes[100..118].copy_from_slice(b"CreateDXGIFactory\0");
+        fs::write(&helper_dll, &helper_bytes).unwrap();
+
+        let api = detect_api(&main_exe, &["RenderHelper.dll".to_string(), "spDx9.dll".to_string()]);
+        assert_eq!(api, Some("DirectX 9".to_string()), "Dawn of War with spDx9.dll and DXGI helper must resolve to DirectX 9");
+
+        let sibling_api = detect_sibling_api(&temp_dir);
+        assert_eq!(sibling_api, Some("DirectX 9".to_string()), "detect_sibling_api must recognize spDx9.dll as DirectX 9");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_scan_mass_effect_2_and_dawn_of_war_live_folders() {
+        let me2_dir = Path::new(r"E:\Games\Mass Effect 2");
+        if me2_dir.is_dir() {
+            let game = scan_game_directory(me2_dir).expect("ME2 must scan");
+            assert_eq!(game.exe_path.file_name().unwrap(), "ME2Game.exe", "ME2Game.exe must be chosen over launcher stub");
+            assert_eq!(game.api, "DirectX 9", "ME2 must resolve to DirectX 9");
+            assert!(!game.available_exes.iter().any(|e| e.name.contains("Config")), "MassEffect2Config.exe must be excluded");
+            if let Some(stub) = game.available_exes.iter().find(|e| e.name == "MassEffect2.exe") {
+                assert_eq!(stub.api, "Undetected", "MassEffect2.exe launcher stub without graphics APIs must be labeled Undetected");
+            }
+        }
+
+        let dow_dir = Path::new(r"E:\Games\Dawn of War Definitive Edition");
+        if dow_dir.is_dir() {
+            let game = scan_game_directory(dow_dir).expect("Dawn of War must scan");
+            assert_eq!(game.api, "DirectX 9", "Dawn of War must resolve to DirectX 9");
+        }
+    }
 }
+
 
 

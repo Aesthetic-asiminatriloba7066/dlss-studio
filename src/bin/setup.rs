@@ -6,11 +6,13 @@ use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/installer_payload.bin"));
 static APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icon.png");
+static UNINSTALL_TARGET: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Clone, Copy, PartialEq)]
 enum SetupPhase {
@@ -22,16 +24,83 @@ enum SetupPhase {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--uninstall") {
-        let silent = args.iter().any(|a| a == "--silent" || a == "/qn" || a == "-s");
-        perform_native_uninstall(silent);
-        return;
+    let curr_exe = std::env::current_exe().ok();
+    let exe_name = curr_exe
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let is_named_uninstall = exe_name.contains("uninstall");
+    let has_uninstall_flag = args.iter().any(|a| a == "--uninstall");
+    let is_worker = args.iter().any(|a| a == "--uninstall-worker");
+    let is_silent = args.iter().any(|a| a == "--silent" || a == "/qn" || a == "-s");
+
+    let is_uninstall_flow = is_named_uninstall || has_uninstall_flag || is_worker;
+
+    if is_uninstall_flow {
+        // Resolve the target directory being uninstalled
+        let target_dir: PathBuf = if let Some(pos) = args.iter().position(|a| a == "--uninstall-worker") {
+            args.get(pos + 1).map(PathBuf::from).unwrap_or_else(|| {
+                detect_existing_installation().map(|(p, _, _)| p).unwrap_or_else(|| PathBuf::from(r"C:\Program Files\DLSS 5 Studio"))
+            })
+        } else if is_named_uninstall {
+            // When uninstall.exe is launched directly, its parent directory is the installation root
+            if let Some(p) = curr_exe.as_ref().and_then(|c| c.parent()) {
+                p.to_path_buf()
+            } else {
+                detect_existing_installation().map(|(p, _, _)| p).unwrap_or_else(|| PathBuf::from(r"C:\Program Files\DLSS 5 Studio"))
+            }
+        } else if let Some((p, _, _)) = detect_existing_installation() {
+            p
+        } else {
+            PathBuf::from(r"C:\Program Files\DLSS 5 Studio")
+        };
+
+        // If running directly from within the installation folder, delegate to trampoline worker in %TEMP%
+        // so that Windows unlocks uninstall.exe and allows the entire directory to be purged!
+        if !is_worker {
+            let temp_dir = std::env::temp_dir();
+            let temp_worker = temp_dir.join("dlss_studio_uninstall.exe");
+
+            if let Some(ref curr) = curr_exe {
+                if curr != &temp_worker {
+                    let _ = std::fs::copy(curr, &temp_worker);
+                }
+            }
+
+            let mut cmd = std::process::Command::new(&temp_worker);
+            cmd.arg("--uninstall-worker");
+            cmd.arg(&target_dir);
+            if is_silent {
+                cmd.arg("--silent");
+            }
+            cmd.stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let _ = cmd.spawn();
+            std::process::exit(0);
+        }
+
+        // We are the worker running from %TEMP%
+        if is_silent {
+            let _ = perform_native_uninstall_worker(&target_dir, true);
+            std::process::exit(0);
+        }
+
+        let _ = UNINSTALL_TARGET.set(target_dir);
     }
 
     let icon = TaoIcon::from_rgba(include_bytes!("../../assets/icon_64.rgba").to_vec(), 64, 64).ok();
 
+    let window_title = if is_uninstall_flow {
+        "DLSS 5 Studio Uninstaller"
+    } else {
+        "DLSS 5 Studio Setup"
+    };
+
     let mut window = WindowBuilder::new()
-        .with_title("DLSS 5 Studio Setup")
+        .with_title(window_title)
         .with_decorations(false)
         .with_transparent(true)
         .with_resizable(false)
@@ -41,7 +110,14 @@ fn main() {
         window = window.with_window_icon(Some(ic));
     }
 
+    let temp_webview = std::env::temp_dir().join("dlss_studio_setup_webview");
+    let _ = std::fs::create_dir_all(&temp_webview);
+    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &temp_webview);
+    }
+
     let cfg = Config::new()
+        .with_data_directory(temp_webview)
         .with_window(window)
         .with_custom_head(
             r#"<meta charset="utf-8" />
@@ -322,6 +398,23 @@ fn main() {
     box-shadow: 0 6px 20px rgba(217, 119, 6, 0.5);
     transform: translateY(-1px);
   }
+  .btn-danger {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    border: 1px solid #ef4444;
+    border-radius: 8px;
+    padding: 10px 24px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);
+    transition: all 0.2s;
+  }
+  .btn-danger:hover {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
+    transform: translateY(-1px);
+  }
   .btn-cancel {
     background: transparent;
     border: 1px solid rgba(156, 163, 175, 0.3);
@@ -363,7 +456,7 @@ fn main() {
 "#.to_string(),
         );
 
-    LaunchBuilder::desktop().with_cfg(cfg).launch(SetupApp);
+    LaunchBuilder::desktop().with_cfg(cfg).launch(RootApp);
 }
 
 fn is_protected_directory<P: AsRef<Path>>(path: P) -> bool {
@@ -411,6 +504,226 @@ fn compute_default_storage_path(install_dir: &Path) -> String {
         }
     } else {
         install_dir.join("data").to_string_lossy().to_string()
+    }
+}
+
+#[component]
+fn RootApp() -> Element {
+    if let Some(target_dir) = UNINSTALL_TARGET.get() {
+        rsx! {
+            UninstallApp { target_dir: target_dir.clone() }
+        }
+    } else {
+        rsx! {
+            SetupApp {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum UninstallPhase {
+    Confirm,
+    Uninstalling,
+    Complete,
+    Error,
+}
+
+#[component]
+fn UninstallApp(target_dir: PathBuf) -> Element {
+    let mut phase = use_signal(|| UninstallPhase::Confirm);
+    let mut delete_appdata = use_signal(|| true);
+    let mut progress = use_signal(|| 0);
+    let mut status_msg = use_signal(|| "Preparing uninstallation...".to_string());
+    let mut error_msg = use_signal(|| String::new());
+
+    let icon_data_uri = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(APP_ICON_PNG)
+    );
+
+    let target_dir_str = target_dir.to_string_lossy().to_string();
+
+    rsx! {
+        div { class: "app-bg-wrapper" }
+        button {
+            class: "btn-close no-drag",
+            title: "Close Uninstaller",
+            onclick: move |_| {
+                dioxus::desktop::window().close();
+            },
+            svg { style: "width: 16px; height: 16px; fill: currentColor;", view_box: "0 0 24 24",
+                path { d: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" }
+            }
+        }
+        div { class: "setup-card",
+            div { class: "drag-header",
+                div { class: "title-group",
+                    img { class: "app-badge", src: "{icon_data_uri}" }
+                    span { class: "app-title", "DLSS 5 STUDIO" }
+                    span {
+                        style: "font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.45); border-radius: 6px; padding: 3px 8px; margin-left: 6px;",
+                        "UNINSTALL"
+                    }
+                }
+            }
+
+            match phase() {
+                UninstallPhase::Confirm => rsx! {
+                    div {
+                        div {
+                            style: "background: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.45); border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: flex-start; gap: 14px;",
+                            span { style: "font-size: 22px; color: #ef4444; line-height: 1;", "⚠" }
+                            div {
+                                div { style: "font-size: 14px; font-weight: 600; color: #fee2e2; margin-bottom: 4px;",
+                                    "Uninstall DLSS 5 Studio"
+                                }
+                                div { style: "font-size: 12px; color: #d1d5db; line-height: 1.45;",
+                                    "Are you sure you want to completely remove DLSS 5 Studio from your computer? All application executables, shortcuts, and background services will be removed."
+                                }
+                            }
+                        }
+
+                        div { class: "section-label", "Installation Folder To Remove" }
+                        div { class: "path-row", style: "margin-bottom: 20px;",
+                            input {
+                                class: "path-input no-drag",
+                                r#type: "text",
+                                value: "{target_dir_str}",
+                                readonly: true,
+                            }
+                        }
+
+                        div { class: "section-label", "Cleanup Options" }
+                        div { class: "prefs-group no-drag", style: "margin-bottom: 28px;",
+                            div {
+                                class: "pref-item",
+                                onclick: move |_| delete_appdata.set(!delete_appdata()),
+                                div { class: if delete_appdata() { "chk-box checked" } else { "chk-box" },
+                                    span { class: "chk-icon", "✓" }
+                                }
+                                div {
+                                    div { style: "font-weight: 500;", "Also remove downloaded models, cache, and preferences" }
+                                    div { class: "helper-text", "Cleans %APPDATA%\\dlss-5-studio. Original game backups in your game folders remain untouched." }
+                                }
+                            }
+                        }
+
+                        div { class: "actions-row no-drag",
+                            button {
+                                class: "btn-cancel",
+                                onclick: move |_| {
+                                    dioxus::desktop::window().close();
+                                },
+                                "Cancel"
+                            }
+                            button {
+                                class: "btn-danger",
+                                onclick: move |_| {
+                                    phase.set(UninstallPhase::Uninstalling);
+                                    let dir_clone = target_dir.clone();
+                                    let del_appdata = delete_appdata();
+
+                                    spawn(async move {
+                                        progress.set(20);
+                                        status_msg.set("Closing background processes...".to_string());
+                                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+                                        progress.set(50);
+                                        status_msg.set("Removing shortcuts and registry entries...".to_string());
+                                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+                                        progress.set(75);
+                                        status_msg.set("Purging application files and directory...".to_string());
+
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            perform_native_uninstall_worker(&dir_clone, del_appdata)
+                                        }).await.unwrap_or(Err("Uninstallation task panicked".to_string()));
+
+                                        match result {
+                                            Ok(_) => {
+                                                progress.set(100);
+                                                status_msg.set("Uninstallation complete!".to_string());
+                                                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                                phase.set(UninstallPhase::Complete);
+                                            }
+                                            Err(err) => {
+                                                error_msg.set(err);
+                                                phase.set(UninstallPhase::Error);
+                                            }
+                                        }
+                                    });
+                                },
+                                "Uninstall DLSS 5 Studio"
+                            }
+                        }
+                    }
+                },
+                UninstallPhase::Uninstalling => rsx! {
+                    div { style: "padding: 30px 0 10px;",
+                        div { class: "status-text", style: "margin-bottom: 12px; font-weight: 600; font-size: 15px; color: #f3f4f6;",
+                            "Uninstalling DLSS 5 Studio..."
+                        }
+                        div { class: "progress-wrap",
+                            div { class: "progress-bar-bg",
+                                div {
+                                    class: "progress-bar-fill",
+                                    style: "width: {progress()}%; background: linear-gradient(90deg, #dc2626, #f59e0b);"
+                                }
+                            }
+                            div { class: "status-text", "{status_msg()}" }
+                        }
+                    }
+                },
+                UninstallPhase::Complete => rsx! {
+                    div { style: "padding: 24px 0 12px; text-align: center;",
+                        div {
+                            style: "width: 58px; height: 58px; border-radius: 50%; background: rgba(16, 185, 129, 0.15); border: 2px solid #10b981; color: #10b981; font-size: 26px; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px;",
+                            "✓"
+                        }
+                        div { style: "font-size: 18px; font-weight: 700; color: #f9fafb; margin-bottom: 8px;",
+                            "Uninstallation Complete"
+                        }
+                        div { style: "font-size: 13px; color: #9ca3af; margin-bottom: 28px; line-height: 1.5; max-width: 440px; margin-left: auto; margin-right: auto;",
+                            "DLSS 5 Studio has been completely removed from your computer. Thank you for using DLSS 5 Studio."
+                        }
+                        div { class: "actions-row no-drag", style: "justify-content: center;",
+                            button {
+                                class: "btn-install",
+                                onclick: move |_| {
+                                    dioxus::desktop::window().close();
+                                },
+                                "Close"
+                            }
+                        }
+                    }
+                },
+                UninstallPhase::Error => rsx! {
+                    div { style: "padding: 20px 0 10px;",
+                        div { class: "warning-banner", style: "border-color: #ef4444; background: rgba(239, 68, 68, 0.1); margin-bottom: 20px;",
+                            span { class: "warning-icon", style: "color: #ef4444;", "✕" }
+                            div {
+                                div { style: "font-size: 13px; font-weight: 600; color: #fca5a5;", "Uninstallation Failed" }
+                                div { style: "font-size: 12px; color: #fecaca; margin-top: 2px;", "{error_msg()}" }
+                            }
+                        }
+                        div { class: "actions-row no-drag",
+                            button {
+                                class: "btn-cancel",
+                                onclick: move |_| {
+                                    dioxus::desktop::window().close();
+                                },
+                                "Close"
+                            }
+                            button {
+                                class: "btn-install",
+                                onclick: move |_| phase.set(UninstallPhase::Confirm),
+                                "Retry"
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1030,39 +1343,18 @@ fn run_installation_pipeline(
 }
 
 /// Silently or interactively uninstalls DLSS 5 Studio
+#[allow(dead_code)]
 fn perform_native_uninstall(silent: bool) {
-    // 1. Terminate any running instances
-    let _ = std::process::Command::new("taskkill")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args(["/F", "/IM", "dlss-studio.exe", "/IM", "dlss5-swapper-rust.exe", "/IM", "dlss5-swapper-rust-portable.exe"])
-        .status();
-
-    // 2. Remove Shortcuts
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let sm = PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\DLSS 5 Studio.lnk");
-        let _ = std::fs::remove_file(sm);
-    }
-    if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        let dt = PathBuf::from(userprofile).join(r"Desktop\DLSS 5 Studio.lnk");
-        let _ = std::fs::remove_file(dt);
-    }
-
-    // 3. Remove Windows Uninstall Registry Key
-    unregister_uninstall_entry();
-
-    // 4. Remove Windows Startup Run Key
-    let _ = crate_startup_uninstall_cleanup();
-
-    // 5. Remove Application Binary & Config
-    if let Ok(curr) = std::env::current_exe() {
-        if let Some(parent) = curr.parent() {
-            let exe = parent.join("dlss-studio.exe");
-            let _ = std::fs::remove_file(exe);
-            let storage_cfg = parent.join("storage.json");
-            let _ = std::fs::remove_file(storage_cfg);
-        }
-    }
-
+    let target_dir = detect_existing_installation()
+        .map(|(p, _, _)| p)
+        .unwrap_or_else(|| {
+            if let Ok(curr) = std::env::current_exe() {
+                curr.parent().unwrap_or(Path::new(r"C:\Program Files\DLSS 5 Studio")).to_path_buf()
+            } else {
+                PathBuf::from(r"C:\Program Files\DLSS 5 Studio")
+            }
+        });
+    let _ = perform_native_uninstall_worker(&target_dir, true);
     if !silent {
         use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
         let text = to_wide("DLSS 5 Studio has been successfully uninstalled from your computer.");
@@ -1076,6 +1368,81 @@ fn perform_native_uninstall(silent: bool) {
             );
         }
     }
+}
+
+/// Executes the full native uninstall worker operations: closing processes, purging files,
+/// unregistering shortcuts and registry keys, removing the installation directory, and cleaning app data.
+fn perform_native_uninstall_worker(target_install_dir: &Path, delete_appdata: bool) -> Result<(), String> {
+    // 1. Terminate any running instances of dlss-studio
+    let _ = std::process::Command::new("taskkill")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["/F", "/IM", "dlss-studio.exe", "/IM", "dlss-studio-portable.exe", "/IM", "dlss5-swapper-rust.exe", "/IM", "dlss5-swapper-rust-portable.exe"])
+        .status();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // 2. Remove Shortcuts
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let sm = PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\DLSS 5 Studio.lnk");
+        let _ = std::fs::remove_file(sm);
+    }
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let dt = PathBuf::from(userprofile).join(r"Desktop\DLSS 5 Studio.lnk");
+        let _ = std::fs::remove_file(dt);
+    }
+
+    // 3. Remove Windows Registry Entries
+    unregister_uninstall_entry();
+    let _ = crate_startup_uninstall_cleanup();
+
+    // 4. Purge the entire target installation directory
+    if target_install_dir.exists() {
+        for _ in 0..5 {
+            if std::fs::remove_dir_all(target_install_dir).is_ok() || !target_install_dir.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        if target_install_dir.exists() {
+            // Delete individual files if remove_dir_all is partially hindered
+            for entry in walkdir::WalkDir::new(target_install_dir).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            let _ = std::fs::remove_dir_all(target_install_dir);
+        }
+    }
+
+    // 5. Cleanup user cache, downloaded components, and preferences if requested
+    if delete_appdata {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let user_dir = PathBuf::from(appdata).join("dlss-5-studio");
+            if user_dir.exists() {
+                let _ = std::fs::remove_dir_all(user_dir);
+            }
+        }
+        if let Ok(progdata) = std::env::var("ProgramData") {
+            let pd_dir = PathBuf::from(progdata).join("dlss-5-studio");
+            if pd_dir.exists() {
+                let _ = std::fs::remove_dir_all(pd_dir);
+            }
+        }
+    }
+
+    // 6. Schedule self-deletion of the temporary worker binary from %TEMP%
+    if let Ok(curr) = std::env::current_exe() {
+        if curr.starts_with(std::env::temp_dir()) {
+            let _ = std::process::Command::new("cmd.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .args(["/C", "choice /C Y /N /D Y /T 2 > NUL & del", &format!("\"{}\"", curr.display())])
+                .spawn();
+        }
+    }
+
+    Ok(())
 }
 
 fn crate_startup_uninstall_cleanup() -> Result<(), ()> {

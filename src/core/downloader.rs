@@ -9,11 +9,20 @@ pub const FEEDER_ARCHIVE_SHA256: &str = "0d1deebf531436a6d0914548e450a790aefa53c
 pub const VORT_ARCHIVE_URL: &str = "https://codeload.github.com/vortigern11/vort_Shaders/zip/b410b9f0c0fbb83c8cb42164aaf1655fab386f4a";
 pub const VORT_ARCHIVE_SHA256: &str = "231ba34a75556f9943e359559a89b0d0cc2caa322d9dcdee5630061bf9fe13b6";
 
+pub const RESHADE_SHADERS_SLIM_URL: &str = "https://codeload.github.com/crosire/reshade-shaders/zip/6db142b4b1a05c764222e5b0bd9a644b7ccfe1dc";
+pub const RESHADE_SHADERS_SLIM_SHA256: &str = "12d082c8ab1dbcb5e221e1b6116a0343f3182ee517f09bb966b117acc7635312";
+
 pub const RESHADE_FXH_URL: &str = "https://raw.githubusercontent.com/crosire/reshade-shaders/slim/Shaders/ReShade.fxh";
 pub const RESHADE_FXH_SHA256: &str = "6dabfbbaf968c3871905d2ea17f96572ff7b1cec01310b5d0e5252b66b30174f";
 
 pub const RESHADE_UI_FXH_URL: &str = "https://raw.githubusercontent.com/crosire/reshade-shaders/slim/Shaders/ReShadeUI.fxh";
 pub const RESHADE_UI_FXH_SHA256: &str = "78adf672df47460297eb9fe6dd238d2aafa24510b52b84feb1a745dff70eb901";
+
+pub const DRAWTEXT_FXH_URL: &str = "https://raw.githubusercontent.com/crosire/reshade-shaders/slim/Shaders/DrawText.fxh";
+pub const DRAWTEXT_FXH_SHA256: &str = "b79cc4dfb3e98bcf4c06193d00ea7631d74f467f73a4deeeee13e71336d3e680";
+
+pub const FONTATLAS_PNG_URL: &str = "https://raw.githubusercontent.com/crosire/reshade-shaders/slim/Textures/FontAtlas.png";
+pub const FONTATLAS_PNG_SHA256: &str = "11a711a8167d1c1606892e6fa6f661a477e749d6cbdb1ff700ac381842066ec3";
 
 pub const MFG_10_URL: &str = "https://github.com/mavismmg/MFGAdaUnlock-RenoDx/releases/download/1.0/renodx-mfgunlock.addon64";
 pub const MFG_10_SHA256: &str = "f9f10c685e3e89077f751df2394a1629615a56b58d111dff26b39894e772d50e";
@@ -512,9 +521,13 @@ pub fn find_local_feeder_components() -> Option<FeederComponents> {
             continue;
         };
 
-        let shader_dir = if dir.join("reshade-shaders").join("Shaders").is_dir() {
+        let shader_dir = if dir.join("reshade-shaders").join("Shaders").join("DLSS5_Feed.fx").is_file()
+            && dir.join("reshade-shaders").join("Shaders").join("DrawText.fxh").is_file()
+        {
             dir.join("reshade-shaders")
-        } else if dir.join("feeder-shaders").join("Shaders").is_dir() {
+        } else if dir.join("feeder-shaders").join("Shaders").join("DLSS5_Feed.fx").is_file()
+            && dir.join("feeder-shaders").join("Shaders").join("DrawText.fxh").is_file()
+        {
             dir.join("feeder-shaders")
         } else {
             continue;
@@ -600,16 +613,46 @@ pub async fn ensure_feeder_components(log: &mut Vec<String>) -> Result<FeederCom
         let _ = fs::remove_file(&vort_zip);
     }
 
-    // 3. Download ReShade standard headers
+    // 3. Download ReShade standard framework headers and textures
+    let slim_dir = comp_root.join("reshade-shaders-slim");
+    let slim_zip = comp_root.join("reshade-shaders-slim.zip");
+    if !slim_dir.join("reshade-shaders-6db142b4b1a05c764222e5b0bd9a644b7ccfe1dc").join("Shaders").join("DrawText.fxh").is_file()
+        && !slim_dir.join("Shaders").join("DrawText.fxh").is_file()
+    {
+        log.push("[DOWNLOAD] Fetching ReShade framework headers and textures from upstream slim branch...".to_string());
+        if download_file_with_sha256(RESHADE_SHADERS_SLIM_URL, &slim_zip, RESHADE_SHADERS_SLIM_SHA256).await.is_ok() {
+            if let Ok(file) = fs::File::open(&slim_zip) {
+                let _ = extract_zip(file, &slim_dir);
+                let _ = fs::remove_file(&slim_zip);
+                log.push("[FEEDER] ReShade framework headers unpacked successfully".to_string());
+            }
+        }
+    }
+
+    let slim_sub = if slim_dir.join("reshade-shaders-6db142b4b1a05c764222e5b0bd9a644b7ccfe1dc").is_dir() {
+        slim_dir.join("reshade-shaders-6db142b4b1a05c764222e5b0bd9a644b7ccfe1dc")
+    } else {
+        slim_dir.clone()
+    };
+
+    // Direct fallback for individual files if needed
     let headers_dir = comp_root.join("reshade-headers");
     let fxh_path = headers_dir.join("ReShade.fxh");
     let ui_fxh_path = headers_dir.join("ReShadeUI.fxh");
-    if !fxh_path.is_file() {
-        log.push("[DOWNLOAD] Fetching ReShade.fxh header from upstream slim branch...".to_string());
-        download_file_with_sha256(RESHADE_FXH_URL, &fxh_path, RESHADE_FXH_SHA256).await?;
+    let drawtext_path = headers_dir.join("DrawText.fxh");
+    let fontatlas_path = headers_dir.join("FontAtlas.png");
+
+    if !slim_sub.join("Shaders").join("ReShade.fxh").is_file() && !fxh_path.is_file() {
+        let _ = download_file_with_sha256(RESHADE_FXH_URL, &fxh_path, RESHADE_FXH_SHA256).await;
     }
-    if !ui_fxh_path.is_file() {
-        download_file_with_sha256(RESHADE_UI_FXH_URL, &ui_fxh_path, RESHADE_UI_FXH_SHA256).await?;
+    if !slim_sub.join("Shaders").join("ReShadeUI.fxh").is_file() && !ui_fxh_path.is_file() {
+        let _ = download_file_with_sha256(RESHADE_UI_FXH_URL, &ui_fxh_path, RESHADE_UI_FXH_SHA256).await;
+    }
+    if !slim_sub.join("Shaders").join("DrawText.fxh").is_file() && !drawtext_path.is_file() {
+        let _ = download_file_with_sha256(DRAWTEXT_FXH_URL, &drawtext_path, DRAWTEXT_FXH_SHA256).await;
+    }
+    if !slim_sub.join("Textures").join("FontAtlas.png").is_file() && !fontatlas_path.is_file() {
+        let _ = download_file_with_sha256(FONTATLAS_PNG_URL, &fontatlas_path, FONTATLAS_PNG_SHA256).await;
     }
 
     // 4. Assemble consolidated reshade-shaders tree
@@ -626,9 +669,39 @@ pub async fn ensure_feeder_components(log: &mut Vec<String>) -> Result<FeederCom
         let _ = fs::copy(&dlss5_feed_fx, target_shaders.join("DLSS5_Feed.fx"));
     }
 
-    // Copy ReShade headers
-    let _ = fs::copy(&fxh_path, target_shaders.join("ReShade.fxh"));
-    let _ = fs::copy(&ui_fxh_path, target_shaders.join("ReShadeUI.fxh"));
+    // Copy all framework headers and textures from slim bundle
+    if slim_sub.join("Shaders").is_dir() {
+        for entry in walkdir::WalkDir::new(slim_sub.join("Shaders")).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.ends_with(".fxh") || fname.ends_with(".fx") {
+                    let _ = fs::copy(entry.path(), target_shaders.join(&fname));
+                }
+            }
+        }
+    }
+    if slim_sub.join("Textures").is_dir() {
+        for entry in walkdir::WalkDir::new(slim_sub.join("Textures")).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                let _ = fs::copy(entry.path(), target_textures.join(fname));
+            }
+        }
+    }
+
+    // Fallback direct copies
+    if fxh_path.is_file() {
+        let _ = fs::copy(&fxh_path, target_shaders.join("ReShade.fxh"));
+    }
+    if ui_fxh_path.is_file() {
+        let _ = fs::copy(&ui_fxh_path, target_shaders.join("ReShadeUI.fxh"));
+    }
+    if drawtext_path.is_file() {
+        let _ = fs::copy(&drawtext_path, target_shaders.join("DrawText.fxh"));
+    }
+    if fontatlas_path.is_file() {
+        let _ = fs::copy(&fontatlas_path, target_textures.join("FontAtlas.png"));
+    }
 
     // Copy VORT motion shaders and includes
     let vort_sub = if vort_dir.join("vort_Shaders-b410b9f0c0fbb83c8cb42164aaf1655fab386f4a").is_dir() {
@@ -1193,5 +1266,47 @@ mod tests {
         assert!(res.is_ok(), "Mandatory download failed: {:?}", res);
         assert!(is_streamline_cached(), "Streamline must be cached after download");
         assert!(are_all_mandatory_components_cached(), "All mandatory components must be cached");
+    }
+
+    #[test]
+    fn test_feeder_shaders_validation_structure() {
+        let temp = std::env::temp_dir().join(format!("test_feeder_check_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let s_dir = temp.join("feeder-shaders");
+        fs::create_dir_all(s_dir.join("Shaders")).unwrap();
+        fs::create_dir_all(s_dir.join("Textures")).unwrap();
+
+        fs::write(s_dir.join("Shaders").join("DLSS5_Feed.fx"), b"// test").unwrap();
+        // Without DrawText.fxh, shader check should fail
+        let has_all_initial = s_dir.join("Shaders").join("DLSS5_Feed.fx").is_file()
+            && s_dir.join("Shaders").join("DrawText.fxh").is_file();
+        assert!(!has_all_initial);
+
+        // Add DrawText.fxh and FontAtlas.png
+        fs::write(s_dir.join("Shaders").join("DrawText.fxh"), b"// test drawtext").unwrap();
+        fs::write(s_dir.join("Textures").join("FontAtlas.png"), b"PNG").unwrap();
+
+        let has_all_final = s_dir.join("Shaders").join("DLSS5_Feed.fx").is_file()
+            && s_dir.join("Shaders").join("DrawText.fxh").is_file()
+            && s_dir.join("Textures").join("FontAtlas.png").is_file();
+        assert!(has_all_final);
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[tokio::test]
+    async fn test_feeder_components_live_assembly() {
+        let mut log = Vec::new();
+        let res = ensure_feeder_components(&mut log).await;
+        assert!(res.is_ok(), "ensure_feeder_components failed: {:?}", res);
+        let fc = res.unwrap();
+        println!("FC SHADER DIR: {:?}", fc.shader_dir);
+        for l in &log {
+            println!("LOG: {}", l);
+        }
+        assert!(fc.shader_dir.join("Shaders").join("DLSS5_Feed.fx").is_file());
+        assert!(fc.shader_dir.join("Shaders").join("DrawText.fxh").is_file());
+        assert!(fc.shader_dir.join("Shaders").join("ReShade.fxh").is_file());
+        assert!(fc.shader_dir.join("Shaders").join("ReShadeUI.fxh").is_file());
+        assert!(fc.shader_dir.join("Textures").join("FontAtlas.png").is_file());
     }
 }

@@ -46,6 +46,7 @@ fn main() {
             passes,
             mfg_unlock: false,
             mfg_multiplier: 1,
+            nr_style: 0,
         };
         match core::optiscaler::deploy_optiscaler(&opts) {
             Ok(res) => {
@@ -149,6 +150,7 @@ fn main() {
                 passes: 1,
                 mfg_unlock: true,
                 mfg_multiplier: 4,
+                nr_style: 0,
             };
             match core::optiscaler::deploy_optiscaler(&opts) {
                 Ok(res) => {

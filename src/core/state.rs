@@ -530,6 +530,7 @@ mod tests {
             files: Vec::new(),
             available_exes: Vec::new(),
             is_laa: true,
+            nr_style: 0,
         };
         state.cached_games.push(game.clone());
         assert!(!state.is_hidden(&game_dir));

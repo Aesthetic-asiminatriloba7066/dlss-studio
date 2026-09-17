@@ -208,6 +208,7 @@ mod tests {
             files: Vec::new(),
             available_exes: Vec::new(),
             is_laa: false,
+            nr_style: 0,
         }
     }
 

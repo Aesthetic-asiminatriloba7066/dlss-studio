@@ -379,6 +379,8 @@ pub fn App() -> Element {
     let mut opti_passes = use_signal(|| 3u32);
     let mut mfg_choice = use_signal(|| false);
     let mut mfg_multiplier = use_signal(|| 4u32);
+    let mut nr_style_choice = use_signal(|| true);
+    let mut nr_style_preset = use_signal(|| 0usize);
     let mut job_lines = use_signal(|| vec!["Ready".to_string()]);
     let mut copy_toast = use_signal(|| false);
     let mut copy_toast_text = use_signal(|| "Copied to clipboard".to_string());
@@ -532,6 +534,14 @@ pub fn App() -> Element {
     });
 
     let selected_game = sheet_game_idx.read().and_then(|idx| games.read().get(idx).cloned());
+
+    use_effect(move || {
+        if let Some(idx) = *sheet_game_idx.read() {
+            if let Some(g) = games.read().get(idx) {
+                nr_style_preset.set(g.nr_style);
+            }
+        }
+    });
 
     // Filter games list (lazy: only evaluate when games tab is active)
     let (visible_games, store_order): (Vec<(usize, GameEntry)>, Vec<String>) = if *active_view.read() == "games" {
@@ -2653,6 +2663,7 @@ pub fn App() -> Element {
                             mfg_choice.set(false);
                         }
                         let show_pre_sr = effective_backend == "optiscaler";
+                        let show_nr_style = effective_backend == "reshade" || (effective_backend == "optiscaler" && *opti_pre_sr.read());
                         let feeder_label = if is_dx11 {
                             crate::core::i18n::t(&current_lang.read(), "feeder_label_dx11")
                         } else if is_vulkan {
@@ -3055,6 +3066,42 @@ pub fn App() -> Element {
                                             }
                                         }
 
+                                        if show_nr_style {
+                                            div { class: if *nr_style_choice.read() { "sheet-feature-card on" } else { "sheet-feature-card" },
+                                                input {
+                                                    type: "checkbox",
+                                                    id: "chkNrStyle",
+                                                    checked: *nr_style_choice.read(),
+                                                    onchange: move |e| nr_style_choice.set(e.checked())
+                                                }
+                                                div { class: "body",
+                                                    div { class: "t",
+                                                        label {
+                                                            r#for: "chkNrStyle",
+                                                            class: "t-left",
+                                                            style: "cursor: pointer;",
+                                                            span { "{crate::core::i18n::t(&current_lang.read(), \"feature_nr_style_title\")}" }
+                                                            span { class: "tag accent", "{crate::core::i18n::t(&current_lang.read(), \"feature_nr_style_tag\")}" }
+                                                        }
+                                                        div { class: "passes-ctrl",
+                                                            span { "{crate::core::i18n::t(&current_lang.read(), \"feature_nr_style_label\")}" }
+                                                            select {
+                                                                class: "passes-select",
+                                                                style: "min-width: 140px;",
+                                                                value: "{nr_style_preset}",
+                                                                disabled: !*nr_style_choice.read(),
+                                                                onchange: move |e| nr_style_preset.set(e.value().parse::<usize>().unwrap_or(0)),
+                                                                option { value: "0", "{crate::core::i18n::t(&current_lang.read(), \"preview_model_a\")}" }
+                                                                option { value: "1", "{crate::core::i18n::t(&current_lang.read(), \"preview_model_b\")}" }
+                                                                option { value: "2", "{crate::core::i18n::t(&current_lang.read(), \"preview_model_c\")}" }
+                                                            }
+                                                        }
+                                                    }
+                                                    div { class: "d", "{crate::core::i18n::t(&current_lang.read(), \"feature_nr_style_desc\")}" }
+                                                }
+                                            }
+                                        }
+
                                         if show_mfg {
                                             div { class: if *mfg_choice.read() { "sheet-feature-card on" } else { "sheet-feature-card" },
                                                 input {
@@ -3145,6 +3192,7 @@ pub fn App() -> Element {
                                                                 *mfg_choice.read()
                                                             };
                                                             let mfg_multiplier_val = *mfg_multiplier.read();
+                                                            let nr_style_val = if *nr_style_choice.read() { *nr_style_preset.read() } else { 0 };
                                                             move |_| {
                                                                 if *is_busy.read() {
                                                                     return;
@@ -3189,6 +3237,7 @@ pub fn App() -> Element {
                                                                         passes: opti_passes_val,
                                                                         mfg_unlock: mfg_choice_val,
                                                                         mfg_multiplier: mfg_multiplier_val,
+                                                                        nr_style: nr_style_val,
                                                                     };
 
                                                                     // Asynchronously fetch/verify Feeder components and latest MFG unlock if required
@@ -3313,6 +3362,7 @@ pub fn App() -> Element {
                                                                                 updated_game.reshade_installed = true;
                                                                                 updated_game.installed_route = Some("feeder".to_string());
                                                                             }
+                                                                            updated_game.nr_style = nr_style_val;
                                                                             updated_game.has_backup = true;
 
                                                                             let mut current_games = games.read().clone();
