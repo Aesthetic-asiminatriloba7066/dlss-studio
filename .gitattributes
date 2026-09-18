@@ -1,0 +1,2 @@
+# GitHub Linguist overrides
+*.css linguist-detectable=false
