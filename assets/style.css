@@ -1204,6 +1204,57 @@ button, input, select, textarea {
 .emu-note.anti-cheat-warning b {
   color: #e05a5a;
 }
+.emu-note.incompatibility-warning {
+  background: rgba(239, 68, 68, .12);
+  border: 1px solid rgba(239, 68, 68, .45);
+  border-left: 4px solid #ef4444;
+  box-shadow: 0 0 20px rgba(239, 68, 68, .12);
+}
+.emu-note.incompatibility-warning b {
+  color: #f87171;
+  font-size: 13px;
+  letter-spacing: .2px;
+}
+.emu-note.incompatibility-warning .advisory-intro {
+  color: #fca5a5;
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+.emu-note.incompatibility-warning .advisory-reasons {
+  margin: 8px 0 6px 0;
+  padding-left: 18px;
+  color: #fecaca;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.emu-note.incompatibility-warning .advisory-reasons li {
+  margin-bottom: 3px;
+}
+.emu-note.incompatibility-warning .advisory-reasons strong {
+  color: #ffffff;
+}
+.emu-note.incompatibility-warning .advisory-footer {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #fca5a5;
+  opacity: .85;
+  font-style: italic;
+}
+.tag.advisory {
+  background: rgba(239, 68, 68, .2) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, .4) !important;
+}
+.btn-install.override-mode {
+  background: linear-gradient(160deg, #dc2626, #991b1b) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 22px rgba(220, 38, 38, .38) !important;
+}
+.btn-install.override-mode:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(220, 38, 38, .55) !important;
+}
 
 .sheet-actions { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
 .btn-install {

@@ -505,8 +505,15 @@ impl PayloadBundle {
 }
 
 /// Embedded ReShade Companion In-Game Overlay Add-on (dlss5-lab-overlay.addon64)
-/// Enables 100% self-contained single-file portable execution without external loose files.
-pub const EMBEDDED_OVERLAY_ADDON: &[u8] = include_bytes!("../../assets/dlss5-lab-overlay.addon64");
+/// Deflated at build-time to save ~540 KB from the binary; unpacked on demand to AppData components.
+pub const EMBEDDED_OVERLAY_ADDON_DEFLATED: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/dlss5-lab-overlay.addon64.deflate"));
+pub const EXPECTED_OVERLAY_ADDON_LEN: u64 = 868_352;
+
+pub fn decompress_embedded_overlay_addon() -> Vec<u8> {
+    miniz_oxide::inflate::decompress_to_vec(EMBEDDED_OVERLAY_ADDON_DEFLATED)
+        .expect("Failed to decompress embedded dlss5-lab-overlay.addon64")
+}
 
 /// Verifies that a discovered overlay add-on binary is a valid 64-bit ReShade addon payload
 fn is_native_overlay_addon(path: &Path) -> bool {
@@ -523,16 +530,17 @@ fn is_native_overlay_addon(path: &Path) -> bool {
 
 /// Locates or materializes the DLSS 5 Studio In-Game Overlay addon (dlss5-lab-overlay.addon64)
 pub fn find_overlay_addon_payload() -> Option<PathBuf> {
-    // 1. First priority: ensure AppData components contains a fresh, verified copy of EMBEDDED_OVERLAY_ADDON
+    // 1. First priority: ensure AppData components contains a fresh, verified copy of the overlay addon
     let appdata_comp = crate::core::state::get_appdata_dir().join("components");
     let target = appdata_comp.join("dlss5-lab-overlay.addon64");
     let target_needs_write = match fs::metadata(&target) {
-        Ok(meta) => meta.len() != EMBEDDED_OVERLAY_ADDON.len() as u64,
+        Ok(meta) => meta.len() != EXPECTED_OVERLAY_ADDON_LEN,
         Err(_) => true,
     };
     if target_needs_write {
         let _ = fs::create_dir_all(&appdata_comp);
-        let _ = fs::write(&target, EMBEDDED_OVERLAY_ADDON);
+        let decompressed = decompress_embedded_overlay_addon();
+        let _ = fs::write(&target, &decompressed);
     }
 
     let mut candidates = Vec::new();
