@@ -100,7 +100,12 @@ jobs:
           if [ -n "$INPUT_TITLE" ]; then
             TITLE="$INPUT_TITLE"
           elif [ -f "RELEASE_NOTES.md" ]; then
-            TITLE="${TAG} — Initial Release: DLSS 5 Studio"
+            FIRST_HEADER=$(head -n 1 RELEASE_NOTES.md | sed 's/^# *//' | tr -d '\r')
+            if [ -n "$FIRST_HEADER" ]; then
+              TITLE="${FIRST_HEADER}"
+            else
+              TITLE="${TAG} — DLSS 5 Studio"
+            fi
           else
             TITLE="${TAG} — ${COMMIT_SUBJECT}"
           fi
