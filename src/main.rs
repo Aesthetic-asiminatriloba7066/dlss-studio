@@ -114,7 +114,12 @@ fn main() {
         }
     };
 
-    let css_style = include_str!("../assets/style.css");
+    let css_bytes = miniz_oxide::inflate::decompress_to_vec(include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/style.css.deflate"
+    )))
+    .expect("Failed to decompress embedded style.css");
+    let css_style = String::from_utf8(css_bytes).expect("style.css is not valid UTF-8");
     let css_overlay_lab = include_str!("../assets/overlay-lab.css");
     let css_overlay_ctrl = include_str!("../assets/overlay-controls.css");
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6] - 2026-09-18
+
+### Added
+- **Route Advisory & Force Override Engine**: Replaced hard-blocking route restrictions with an interactive advisory model. All backends (`ReShade`, `OptiScaler`) and routes (`DLSS 5 Feeder`, `Native DLSS`) remain selectable for every title. Incompatible configurations surface a prominent crimson advisory alert card (`🚨 High Incompatibility Warning`) explaining technical restrictions, paired with a glowing crimson `Deploy Anyway (Force Override) ⚠️` action for advanced users.
+- **Automatic Deployment State Reflection**: Opening the game detail sheet now inspects disk state and synchronizes all UI controls (`backend_choice`, `route_choice`, `opti_pre_sr`, `opti_passes`, `mfg_choice`, and `nr_style`) to match active deployments instead of defaulting to first options.
+- **Intelligent Auto-Selection for Vanilla Titles**: When opening an unmodded game, the UI automatically evaluates the game's architecture and graphics API via `recommended_route()`, defaulting to **DLSS 5 Feeder** for DirectX 11, Vulkan, OpenGL, DirectX 9, or non-DLSS games, and **Native DLSS** for 64-bit DirectX 12 DLSS games, preventing false warning alerts on initial view.
+
+### Changed
+- **Executable Switching Route Adaptation**: Switching between binaries in the game detail sheet automatically updates the route to the optimal path for the chosen binary if the game is unpatched/unmodded. If an active deployment exists, the existing configuration is strictly preserved.
+
+---
+
 ## [1.0.5] - 2026-09-17
  
 ### Fixed

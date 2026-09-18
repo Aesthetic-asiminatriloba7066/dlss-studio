@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "dlss5-swapper-rust"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 default-run = "dlss-studio"
 description = "DLSS 5 Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"
@@ -30,7 +30,7 @@ pelite = "0.10"
 sha2 = "0.10"
 hex = "0.4"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["default-tls", "json"] }
 keyvalues-parser = "0.2.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
@@ -48,6 +48,10 @@ windows = { version = "0.58", features = [
 ] }
 base64 = "0.22"
 mimalloc = { version = "0.1", default-features = false }
+miniz_oxide = "0.8"
+
+[build-dependencies]
+miniz_oxide = "0.8"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

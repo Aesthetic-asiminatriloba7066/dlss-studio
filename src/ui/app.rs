@@ -5,7 +5,7 @@ use base64::Engine;
 use crate::core::scan::{scan_game_directory, scan_library_root, discover_all_launchers, discover_drive_roots, dedupe_games, GameEntry};
 use crate::core::gpu::{detect_gpus, GpuInfo};
 
-const BRAND_BADGE_PNG: &[u8] = include_bytes!("../../assets/brand-badge.png");
+const BRAND_BADGE_WEBP: &[u8] = include_bytes!("../../assets/brand-badge.webp");
 
 
 use crate::core::journal::{restore_game, read_history, append_history, HistoryRow};
@@ -275,8 +275,8 @@ pub fn App() -> Element {
     });
 
     let brand_badge_data_uri = use_hook(|| {
-        let b64 = base64::engine::general_purpose::STANDARD.encode(BRAND_BADGE_PNG);
-        format!("data:image/png;base64,{}", b64)
+        let b64 = base64::engine::general_purpose::STANDARD.encode(BRAND_BADGE_WEBP);
+        format!("data:image/webp;base64,{}", b64)
     });
 
     // Background System Tray message listener
@@ -371,6 +371,7 @@ pub fn App() -> Element {
     let init_sheet_open = std::env::var("DLSS_TEST_SHEET").is_ok();
     let mut sheet_open = use_signal(move || init_sheet_open);
     let mut sheet_game_idx = use_signal(|| if std::env::var("DLSS_TEST_SHEET").is_ok() { Some(0) } else { None });
+    let mut last_sheet_game_dir = use_signal(|| None::<std::path::PathBuf>);
     let mut is_editing_game_name = use_signal(|| false);
     let mut edit_game_name_val = use_signal(|| String::new());
     let mut backend_choice = use_signal(|| "reshade".to_string());
@@ -536,10 +537,57 @@ pub fn App() -> Element {
     let selected_game = sheet_game_idx.read().and_then(|idx| games.read().get(idx).cloned());
 
     use_effect(move || {
-        if let Some(idx) = *sheet_game_idx.read() {
-            if let Some(g) = games.read().get(idx) {
-                nr_style_preset.set(g.nr_style);
+        if *sheet_open.read() {
+            if let Some(idx) = *sheet_game_idx.read() {
+                if let Some(g) = games.read().get(idx) {
+                    let cur_dir = Some(g.dir.clone());
+                    if *last_sheet_game_dir.read() != cur_dir {
+                        last_sheet_game_dir.set(cur_dir);
+
+                        let is_deployed = g.installed_route.is_some()
+                            || g.optiscaler_installed
+                            || g.addon_installed
+                            || g.reshade_installed
+                            || g.has_backup;
+
+                        if is_deployed {
+                            // Reflect existing deployed configuration
+                            if g.installed_route.as_deref() == Some("optiscaler") || (g.optiscaler_installed && g.installed_route.is_none()) {
+                                backend_choice.set("optiscaler".to_string());
+                                opti_pre_sr.set(g.optiscaler_presr);
+                                opti_passes.set(if g.optiscaler_passes > 0 { g.optiscaler_passes } else { 1 });
+                                mfg_choice.set(g.mfg_unlock_installed);
+                            } else if g.installed_route.as_deref() == Some("native") {
+                                backend_choice.set("reshade".to_string());
+                                route_choice.set("native".to_string());
+                                mfg_choice.set(g.mfg_unlock_installed);
+                            } else if g.installed_route.as_deref() == Some("feeder") {
+                                backend_choice.set("reshade".to_string());
+                                route_choice.set("feeder".to_string());
+                                mfg_choice.set(g.mfg_unlock_installed);
+                            } else if g.reshade_installed {
+                                backend_choice.set("reshade".to_string());
+                                let rec = crate::core::install_routes::recommended_route(g);
+                                route_choice.set(rec.as_str().to_string());
+                                mfg_choice.set(g.mfg_unlock_installed);
+                            }
+                        } else {
+                            // Unmodded / Vanilla: Automatically select the best compatible path!
+                            let rec = crate::core::install_routes::recommended_route(g);
+                            backend_choice.set("reshade".to_string());
+                            route_choice.set(rec.as_str().to_string());
+                            mfg_choice.set(false);
+                            opti_pre_sr.set(true);
+                            opti_passes.set(1);
+                        }
+
+                        nr_style_preset.set(g.nr_style);
+                        nr_style_choice.set(g.nr_style > 0);
+                    }
+                }
             }
+        } else {
+            last_sheet_game_dir.set(None);
         }
     });
 
@@ -2640,28 +2688,42 @@ pub fn App() -> Element {
                         let is_vulkan = api_lower.contains("vulkan");
                         let is_dx12 = api_lower.contains("12") || api_lower == "d3d12";
                         target_game.can_inject_fg = target_game.bitness == 64 && has_native_dlss && !target_game.has_frame_generation && is_vulkan;
-                        let opti_reason = crate::core::install_routes::check_opti_reason(&target_game);
-                        let is_opti_disabled = opti_reason.is_some();
+                        let opti_advisory = crate::core::install_routes::get_optiscaler_advisory(&target_game);
+                        let native_advisory = crate::core::install_routes::get_native_dlss_advisory(&target_game);
+                        let mfg_advisory = crate::core::install_routes::get_mfg_advisory(&target_game, primary_gpu.is_rtx_40);
                         let ac_warning = crate::core::install_guards::has_anti_cheat(&target_game.dir);
                         let _has_dlss = target_game.dlss_version.is_some();
-                        let is_native_dlss_supported = crate::core::install_routes::is_native_dlss_supported(&target_game);
                         let cur_backend = backend_choice.read().clone();
-                        let effective_backend = if is_opti_disabled && cur_backend == "optiscaler" {
-                            "reshade".to_string()
+                        let effective_backend = if cur_backend == "optiscaler" {
+                            "optiscaler".to_string()
                         } else {
-                            cur_backend
+                            "reshade".to_string()
                         };
                         let cur_route = route_choice.read().clone();
-                        let effective_route = if !is_native_dlss_supported || cur_route == "feeder" {
-                            "feeder".to_string()
-                        } else {
+                        let effective_route = if cur_route == "native" {
                             "native".to_string()
+                        } else {
+                            "feeder".to_string()
                         };
-                        let is_fg_capable = crate::core::install_routes::is_frame_generation_supported(&target_game);
-                        let show_mfg = is_fg_capable && (primary_gpu.is_rtx_40 || target_game.mfg_unlock_installed);
-                        if !show_mfg && *mfg_choice.read() {
-                            mfg_choice.set(false);
+
+                        let mut active_advisories: Vec<crate::core::install_routes::RouteAdvisory> = Vec::new();
+                        if effective_backend == "optiscaler" {
+                            if let Some(adv) = &opti_advisory {
+                                active_advisories.push(adv.clone());
+                            }
+                        } else if effective_route == "native" {
+                            if let Some(adv) = &native_advisory {
+                                active_advisories.push(adv.clone());
+                            }
                         }
+                        if *mfg_choice.read() {
+                            if let Some(adv) = &mfg_advisory {
+                                active_advisories.push(adv.clone());
+                            }
+                        }
+                        let has_override = !active_advisories.is_empty();
+
+                        let show_mfg = true;
                         let show_pre_sr = effective_backend == "optiscaler";
                         let show_nr_style = effective_backend == "reshade" || (effective_backend == "optiscaler" && *opti_pre_sr.read());
                         let feeder_label = if is_dx11 {
@@ -2674,6 +2736,16 @@ pub fn App() -> Element {
                             crate::core::i18n::t(&current_lang.read(), "feeder_label_opengl")
                         } else {
                             crate::core::i18n::t(&current_lang.read(), "feeder_label_general")
+                        };
+                        let opti_display = if opti_advisory.is_some() {
+                            format!("{} ⚠️", crate::core::i18n::t(&current_lang.read(), "opt_optiscaler_dlssnr"))
+                        } else {
+                            crate::core::i18n::t(&current_lang.read(), "opt_optiscaler_dlssnr").to_string()
+                        };
+                        let native_display = if native_advisory.is_some() {
+                            format!("{} ⚠️", crate::core::i18n::t(&current_lang.read(), "opt_native_dlss"))
+                        } else {
+                            crate::core::i18n::t(&current_lang.read(), "opt_native_dlss").to_string()
                         };
                         let laa_status = if target_game.bitness == 32 {
                             if crate::core::pe::is_large_address_aware(&target_game.exe_path) {
@@ -2875,8 +2947,16 @@ pub fn App() -> Element {
                                                                     })) && !is_mod_added_dlss;
                                                                     let is_vulkan_opt = opt.api.to_lowercase().contains("vulkan");
                                                                     current_games[pos].can_inject_fg = opt.bitness == 64 && has_native_dlss && !current_games[pos].has_frame_generation && is_vulkan_opt;
-                                                                    if !is_vulkan_opt {
-                                                                        mfg_choice.set(false);
+
+                                                                    // Only auto-adjust route on exe switch if no deploys have been made at all (unpatched)
+                                                                    let is_deployed = current_games[pos].installed_route.is_some()
+                                                                        || current_games[pos].optiscaler_installed
+                                                                        || current_games[pos].addon_installed
+                                                                        || current_games[pos].reshade_installed
+                                                                        || current_games[pos].has_backup;
+                                                                    if !is_deployed {
+                                                                        let rec = crate::core::install_routes::recommended_route(&current_games[pos]);
+                                                                        route_choice.set(rec.as_str().to_string());
                                                                     }
 
                                                                     let mut s = load_state();
@@ -2997,39 +3077,45 @@ pub fn App() -> Element {
                                 }
 
                                 div { class: "install-options",
-                                            label {
-                                                span { "{crate::core::i18n::t(&current_lang.read(), \"sheet_backend_label\")}" }
-                                                select {
-                                                    id: "backendChoice",
-                                                    value: "{effective_backend}",
-                                                    onchange: move |e| backend_choice.set(e.value()),
-                                                    option { value: "reshade", "{crate::core::i18n::t(&current_lang.read(), \"backend_reshade_default\")}" }
-                                                    option { value: "optiscaler", disabled: is_opti_disabled, "{crate::core::i18n::t(&current_lang.read(), \"opt_optiscaler_dlssnr\")}" }
-                                                }
-                                            }
-                                            if effective_backend != "optiscaler" {
-                                                label {
-                                                    span { "{crate::core::i18n::t(&current_lang.read(), \"sheet_route_label\")}" }
-                                                    select {
-                                                        id: "routeChoice",
-                                                        value: "{effective_route}",
-                                                        onchange: move |e| route_choice.set(e.value()),
-                                                        if is_native_dlss_supported {
-                                                            option { value: "native", "{crate::core::i18n::t(&current_lang.read(), \"opt_native_dlss\")}" }
-                                                        }
-                                                        option { value: "feeder", "{feeder_label}" }
-                                                    }
-                                                }
+                                    label {
+                                        span { "{crate::core::i18n::t(&current_lang.read(), \"sheet_backend_label\")}" }
+                                        select {
+                                            id: "backendChoice",
+                                            value: "{effective_backend}",
+                                            onchange: move |e| backend_choice.set(e.value()),
+                                            option { value: "reshade", "{crate::core::i18n::t(&current_lang.read(), \"backend_reshade_default\")}" }
+                                            option { value: "optiscaler", "{opti_display}" }
+                                        }
+                                    }
+                                    if effective_backend != "optiscaler" {
+                                        label {
+                                            span { "{crate::core::i18n::t(&current_lang.read(), \"sheet_route_label\")}" }
+                                            select {
+                                                id: "routeChoice",
+                                                value: "{effective_route}",
+                                                onchange: move |e| route_choice.set(e.value()),
+                                                option { value: "native", "{native_display}" }
+                                                option { value: "feeder", "{feeder_label}" }
                                             }
                                         }
+                                    }
+                                }
 
-                                        if let Some(ref reason) = opti_reason {
-                                            div {
-                                                class: "emu-note compatibility-warning",
-                                                b { "{crate::core::i18n::t(&current_lang.read(), \"sheet_backend_restriction\")}" }
-                                                span { "{reason.message()}" }
+                                for adv in &active_advisories {
+                                    div {
+                                        class: "emu-note incompatibility-warning",
+                                        b { "🚨 High Incompatibility Warning: {adv.title}" }
+                                        p { class: "advisory-intro", "This route may fail to initialize, cause graphics rendering artifacts, or crash the game due to technical restrictions:" }
+                                        ul { class: "advisory-reasons",
+                                            for reason in &adv.reasons {
+                                                li { "{reason}" }
                                             }
                                         }
+                                        div { class: "advisory-footer",
+                                            span { "{adv.recommendation}" }
+                                        }
+                                    }
+                                }
 
                                         if show_pre_sr {
                                             div { class: if *opti_pre_sr.read() { "sheet-feature-card on" } else { "sheet-feature-card" },
@@ -3117,7 +3203,11 @@ pub fn App() -> Element {
                                                             class: "t-left",
                                                             style: "cursor: pointer;",
                                                             span { "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_title\")}" }
-                                                            span { class: "tag warn", "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_tag\")}" }
+                                                            if mfg_advisory.is_some() {
+                                                                span { class: "tag advisory", "Advisory ⚠️" }
+                                                            } else {
+                                                                span { class: "tag warn", "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_tag\")}" }
+                                                            }
                                                         }
                                                         div { class: "passes-ctrl",
                                                             span { "{crate::core::i18n::t(&current_lang.read(), \"sheet_mfg_multiplier\")}" }
@@ -3135,24 +3225,6 @@ pub fn App() -> Element {
                                                     }
                                                     div { class: "d", "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_desc\")}" }
                                                 }
-                                            }
-                                        } else if is_dx11 && !target_game.has_frame_generation {
-                                            div {
-                                                class: "emu-note",
-                                                b { "4x Multi-Frame Generation: Requires Native DLSS-G on DirectX 11" }
-                                                span { "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_dx11_note\")}" }
-                                            }
-                                        } else if !target_game.has_frame_generation {
-                                            div {
-                                                class: "emu-note",
-                                                b { "4x Multi-Frame Generation: Requires Native DLSS-G" }
-                                                span { "{crate::core::i18n::t(&current_lang.read(), \"feature_mfg_general_note\")}" }
-                                            }
-                                        } else if target_game.has_frame_generation && !primary_gpu.is_rtx_40 && !target_game.mfg_unlock_installed {
-                                            div {
-                                                class: "emu-note",
-                                                b { "4x Multi-Frame Generation: Requires RTX 40-Series GPU" }
-                                                span { "This game supports native Frame Generation, but 4x MFG unlock requires an Ada Lovelace (RTX 40-Series) GPU. (NVIDIA restricts MFG to RTX 50-Series; this mod unlocks it on RTX 40-Series cards)." }
                                             }
                                         }
 
@@ -3177,7 +3249,7 @@ pub fn App() -> Element {
                                             rsx! {
                                                 div { class: "sheet-actions",
                                                     button {
-                                                        class: "btn-install",
+                                                        class: if has_override { "btn-install override-mode" } else { "btn-install" },
                                                         id: "doInstall",
                                                         disabled: *is_busy.read(),
                                                         onclick: {
@@ -3186,11 +3258,7 @@ pub fn App() -> Element {
                                                             let cur_eff_route = effective_route.clone();
                                                             let opti_pre_sr_val = *opti_pre_sr.read();
                                                             let opti_passes_val = *opti_passes.read();
-                                                            let mfg_choice_val = if cur_eff_backend == "optiscaler" && is_dx11 && !target_game.has_frame_generation {
-                                                                false
-                                                            } else {
-                                                                *mfg_choice.read()
-                                                            };
+                                                            let mfg_choice_val = *mfg_choice.read();
                                                             let mfg_multiplier_val = *mfg_multiplier.read();
                                                             let nr_style_val = if *nr_style_choice.read() { *nr_style_preset.read() } else { 0 };
                                                             move |_| {
@@ -3388,14 +3456,16 @@ pub fn App() -> Element {
                                                             }
                                                         },
                                                         {
-                                                            if *is_busy.read() {
-                                                                crate::core::i18n::t(&current_lang.read(), "btn_working")
-                                                            } else if is_deployed {
-                                                                crate::core::i18n::t(&current_lang.read(), "sheet_deploy")
-                                                            } else {
-                                                                crate::core::i18n::t(&current_lang.read(), "install")
-                                                            }
-                                                        }
+                                                             if *is_busy.read() {
+                                                                 crate::core::i18n::t(&current_lang.read(), "btn_working").to_string()
+                                                             } else if has_override {
+                                                                 "Deploy Anyway (Force Override) ⚠️".to_string()
+                                                             } else if is_deployed {
+                                                                 crate::core::i18n::t(&current_lang.read(), "sheet_deploy").to_string()
+                                                             } else {
+                                                                 crate::core::i18n::t(&current_lang.read(), "install").to_string()
+                                                             }
+                                                         }
                                                     }
 
                                                     if target_game.has_backup {
@@ -4196,6 +4266,50 @@ mod tests {
         assert_eq!(format_status("en", &AppStatus::FoundGames(8)), "Found 8 games across sources");
         assert_eq!(format_status("de", &AppStatus::FoundGames(12)), "12 Spiele plattformübergreifend gefunden");
         assert_eq!(format_status("zh", &AppStatus::FoundGames(5)), "共发现 5 款已安装游戏");
+    }
+
+    #[test]
+    fn test_recommended_route_auto_selection_across_apis() {
+        use crate::core::install_routes::{recommended_route, InstallRoute};
+
+        // 1. DirectX 11 title without native DLSS-G -> must auto-select Feeder (compatible, no warnings)
+        let dx11_game = GameEntry {
+            name: "Baldur's Gate 3 DX11".to_string(),
+            api: "DirectX 11".to_string(),
+            bitness: 64,
+            dlss_version: Some("2.4.2.0".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(recommended_route(&dx11_game), InstallRoute::Feeder);
+
+        // 2. 64-bit DirectX 12 title with DLSS -> auto-selects Native DLSS
+        let dx12_game = GameEntry {
+            name: "Cyberpunk 2077".to_string(),
+            api: "DirectX 12".to_string(),
+            bitness: 64,
+            dlss_version: Some("3.7.0.0".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(recommended_route(&dx12_game), InstallRoute::Native);
+
+        // 3. Vulkan title -> must auto-select Feeder
+        let vulkan_game = GameEntry {
+            name: "Doom Eternal".to_string(),
+            api: "Vulkan".to_string(),
+            bitness: 64,
+            dlss_version: Some("3.1.1.0".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(recommended_route(&vulkan_game), InstallRoute::Feeder);
+
+        // 4. Legacy DirectX 9 title (e.g. Mass Effect 2) -> must auto-select Feeder
+        let dx9_game = GameEntry {
+            name: "Mass Effect 2".to_string(),
+            api: "DirectX 9".to_string(),
+            bitness: 32,
+            ..Default::default()
+        };
+        assert_eq!(recommended_route(&dx9_game), InstallRoute::Feeder);
     }
 }
 
