@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use dioxus::html::HasFileData;
 use base64::Engine;
 use crate::core::scan::{scan_game_directory, scan_library_root, discover_all_launchers, discover_drive_roots, dedupe_games, GameEntry};
 use crate::core::gpu::{detect_gpus, GpuInfo};
@@ -11,7 +12,7 @@ const BRAND_BADGE_WEBP: &[u8] = include_bytes!("../../assets/brand-badge.webp");
 use crate::core::journal::{restore_game, read_history, append_history, HistoryRow};
 use crate::core::install_guards::assert_game_closed;
 use crate::core::compatibility::managed_mod_root;
-use crate::core::state::{load_state, save_state, touch, ago, get_state_path, log_message, get_session_log};
+use crate::core::state::{load_state, save_state, touch, ago_localized, get_state_path, log_message, get_session_log, RecentEntry};
 use std::fs;
 
 
@@ -43,6 +44,8 @@ pub enum AppStatus {
     ScanningFolder(String),
     ScanningLaunchers,
     FoundGames(usize),
+    NoGamesFound(String),
+    AddedGame(String),
 }
 
 fn format_status(lang: &str, status: &AppStatus) -> String {
@@ -54,6 +57,8 @@ fn format_status(lang: &str, status: &AppStatus) -> String {
         AppStatus::ScanningFolder(folder) => format!("{} {}...", crate::core::i18n::t(lang, "status_scanning_folder"), folder),
         AppStatus::ScanningLaunchers => crate::core::i18n::t(lang, "status_scanning_launchers").to_string(),
         AppStatus::FoundGames(count) => crate::core::i18n::t_param(lang, "status_found_games", &count.to_string()),
+        AppStatus::NoGamesFound(folder) => crate::core::i18n::t_param(lang, "status_no_game_found", folder),
+        AppStatus::AddedGame(name) => crate::core::i18n::t_param(lang, "status_added_game", name),
     }
 }
 
@@ -123,6 +128,169 @@ fn resolve_game_title(row: &HistoryRow, games: &[GameEntry]) -> String {
     row.dir.clone()
 }
 
+fn resolve_module_meta(rel: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    let lower = rel.to_ascii_lowercase();
+    let file_name = std::path::Path::new(rel)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(rel)
+        .to_ascii_lowercase();
+
+    if file_name == "nvngx_dlss.dll" {
+        ("module_dlss_sr", "NVIDIA", "vendor-nvidia", "DLSS")
+    } else if file_name == "nvngx_dlssg.dll" {
+        ("module_dlss_fg", "NVIDIA", "vendor-nvidia", "DLSS-G")
+    } else if file_name == "nvngx_dlssd.dll" {
+        ("module_dlss_rr", "NVIDIA", "vendor-nvidia", "DLSS-RR")
+    } else if file_name.starts_with("amd_fidelityfx_framegeneration") || file_name.starts_with("amd_fidelityfx_dx12") {
+        ("module_fsr_fg", "AMD", "vendor-amd", "FSR FG")
+    } else if file_name == "sl.dlss.dll" {
+        ("module_sl_dlss", "Streamline", "vendor-sl", "SL DLSS")
+    } else if file_name == "sl.dlss_g.dll" {
+        ("module_sl_fg", "Streamline", "vendor-sl", "SL FG")
+    } else if file_name == "sl.common.dll" || file_name == "sl.interposer.dll" {
+        ("module_sl_core", "Streamline", "vendor-sl", "SL Core")
+    } else if file_name == "sl.reflex.dll" {
+        ("module_sl_reflex", "Streamline", "vendor-sl", "Reflex")
+    } else if file_name == "dxgi.dll" && (lower.contains("optiscaler") || lower.contains("nvngx")) {
+        ("module_optiscaler", "OptiScaler", "vendor-opti", "OptiScaler")
+    } else {
+        ("module_generic_dll", "Runtime", "vendor-generic", "DLL")
+    }
+}
+
+enum IngestResult {
+    SingleGame(GameEntry, std::path::PathBuf),
+    Library(Vec<GameEntry>, std::path::PathBuf),
+    None(std::path::PathBuf),
+}
+
+fn ingest_game_or_library_path(
+    path: std::path::PathBuf,
+    mut games: Signal<Vec<GameEntry>>,
+    mut sheet_game_idx: Signal<Option<usize>>,
+    mut sheet_open: Signal<bool>,
+    mut active_view: Signal<String>,
+    mut managed_folders: Signal<Vec<String>>,
+    mut status_state: Signal<AppStatus>,
+    mut recents: Signal<Vec<RecentEntry>>,
+) {
+    spawn(async move {
+        // 1. Resolve folder if user dropped an .exe or file
+        let folder = if path.is_file() {
+            path.parent().unwrap_or(&path).to_path_buf()
+        } else {
+            path
+        };
+
+        let folder_name = folder.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| folder.to_string_lossy().to_string());
+
+        status_state.set(AppStatus::ScanningFolder(folder_name.clone()));
+
+        let scan_result = tokio::task::spawn_blocking({
+            let folder = folder.clone();
+            move || {
+                // Priority 1: Direct game directory scan
+                if let Some(game) = scan_game_directory(&folder) {
+                    return IngestResult::SingleGame(game, folder);
+                }
+
+                // Priority 2: If user dropped/selected a nested subfolder (e.g. bin, bin64, x64, win64, Content),
+                // check parent directories up to 3 levels
+                let mut curr = folder.as_path();
+                for _ in 0..3 {
+                    if let Some(parent) = curr.parent() {
+                        if let Some(game) = scan_game_directory(parent) {
+                            return IngestResult::SingleGame(game, parent.to_path_buf());
+                        }
+                        curr = parent;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Priority 3: Check if this is a library root containing multiple games (e.g. steamapps/common or D:\Games)
+                let lib_games = scan_library_root(&folder);
+                if !lib_games.is_empty() {
+                    return IngestResult::Library(lib_games, folder);
+                }
+
+                IngestResult::None(folder)
+            }
+        }).await.unwrap_or_else(|_| IngestResult::None(folder.clone()));
+
+        match scan_result {
+            IngestResult::SingleGame(game, root_folder) => {
+                let mut s = load_state();
+                s.unhide_game(&game.dir);
+                let f_str = root_folder.to_string_lossy().to_string();
+                if !s.manual.contains(&f_str) {
+                    s.manual.push(f_str.clone());
+                }
+                let mut current_games = games.read().clone();
+                let idx = if let Some(pos) = current_games.iter().position(|g| g.dir == game.dir) {
+                    current_games[pos] = game.clone();
+                    pos
+                } else {
+                    current_games.push(game.clone());
+                    current_games.len() - 1
+                };
+                s.cached_games = current_games.clone();
+                let _ = save_state(&s);
+                touch(&f_str);
+                let fresh_state = load_state();
+                recents.set(fresh_state.recents);
+                games.set(current_games);
+                sheet_game_idx.set(Some(idx));
+                sheet_open.set(true);
+                active_view.set("games".to_string());
+                status_state.set(AppStatus::AddedGame(game.name.clone()));
+                log_message(&format!("Added game: {}", game.name));
+                if game.poster.is_none() {
+                    trigger_artwork_resolution(games, vec![(game.name.clone(), game.dir.clone())]);
+                }
+            }
+            IngestResult::Library(lib_games, root_folder) => {
+                let count = lib_games.len();
+                let mut s = load_state();
+                for g in &lib_games {
+                    s.unhide_game(&g.dir);
+                }
+                let f_str = root_folder.to_string_lossy().to_string();
+                if !s.folders.contains(&f_str) {
+                    s.folders.push(f_str);
+                    managed_folders.set(s.folders.clone());
+                }
+                let mut current_games = games.read().clone();
+                current_games.extend(lib_games);
+                let deduped = dedupe_games(current_games);
+                s.cached_games = deduped.clone();
+                let _ = save_state(&s);
+                games.set(deduped.clone());
+                active_view.set("games".to_string());
+                status_state.set(AppStatus::FoundGames(count));
+                log_message(&format!("Added library folder: {} (found {} games)", root_folder.display(), count));
+                let missing: Vec<(String, std::path::PathBuf)> = deduped.iter()
+                    .filter(|g| g.poster.is_none())
+                    .map(|g| (g.name.clone(), g.dir.clone()))
+                    .collect();
+                if !missing.is_empty() {
+                    trigger_artwork_resolution(games, missing);
+                }
+            }
+            IngestResult::None(folder) => {
+                let name = folder.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| folder.to_string_lossy().to_string());
+                status_state.set(AppStatus::NoGamesFound(name.clone()));
+                log_message(&format!("No game found in {}", folder.display()));
+            }
+        }
+    });
+}
+
 static RESOLVING_ART_DIRS: std::sync::Mutex<Option<std::collections::HashSet<std::path::PathBuf>>> =
     std::sync::Mutex::new(None);
 
@@ -178,7 +346,6 @@ pub fn App() -> Element {
             let norm = crate::core::state::normalize_game_path(&g.dir);
             !hidden.iter().any(|h| crate::core::state::normalize_path_str(h) == norm)
         });
-        let art_dir = crate::core::state::get_appdata_dir().join("art");
         let custom_names = state.custom_names.clone();
         let mut state_changed = false;
         for game in &mut state.cached_games {
@@ -186,10 +353,6 @@ pub fn App() -> Element {
             if let Some(custom) = custom_names.get(&norm) {
                 game.name = custom.clone();
             }
-            let key = crate::core::steamart::key_for_dir(&game.dir);
-            let cover_file = art_dir.join(format!("{}-cover.jpg", key));
-            let hero_file = art_dir.join(format!("{}-hero.jpg", key));
-
             // Normalize any legacy dlss-art:// or raw path
             if let Some(ref p) = game.poster {
                 let norm_p = crate::core::steamart::normalize_art_uri(p);
@@ -204,11 +367,8 @@ pub fn App() -> Element {
                 Some(ref p) => p.starts_with("data:image/"),
             };
             if needs_art {
-                if cover_file.exists() && cover_file.metadata().map(|m| m.len() > 2000).unwrap_or(false) {
-                    game.poster = Some(format!("http://dlss-art.localhost/art/{}-cover.jpg", key));
-                    state_changed = true;
-                } else if hero_file.exists() && hero_file.metadata().map(|m| m.len() > 2000).unwrap_or(false) {
-                    game.poster = Some(format!("http://dlss-art.localhost/art/{}-hero.jpg", key));
+                if let Some(cached_uri) = crate::core::steamart::find_cached_art(&game.dir) {
+                    game.poster = Some(cached_uri);
                     state_changed = true;
                 }
             }
@@ -246,6 +406,7 @@ pub fn App() -> Element {
     }]);
     let mut games = use_signal(move || init_cached_games);
     let recents = use_signal(move || init_recents);
+    let mut is_drag_over = use_signal(|| false);
     let mut hidden_count = use_signal(move || init_hidden_count);
     let init_active_view = std::env::var("DLSS_TEST_VIEW").unwrap_or_else(|_| "home".to_string());
     let mut active_view = use_signal(move || init_active_view);
@@ -382,9 +543,23 @@ pub fn App() -> Element {
     let mut mfg_multiplier = use_signal(|| 4u32);
     let mut nr_style_choice = use_signal(|| true);
     let mut nr_style_preset = use_signal(|| 0usize);
-    let mut job_lines = use_signal(|| vec!["Ready".to_string()]);
+    let mut job_lines = use_signal(|| vec!["@{status_ready}".to_string()]);
     let mut copy_toast = use_signal(|| false);
     let mut copy_toast_text = use_signal(|| "Copied to clipboard".to_string());
+    let mut toast_generation = use_signal(|| 0u64);
+
+    use_effect(move || {
+        let gen = *toast_generation.read();
+        if *copy_toast.read() {
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                if *toast_generation.peek() == gen {
+                    copy_toast.set(false);
+                }
+            });
+        }
+    });
+    let mut modules_expanded = use_signal(|| false);
 
     // Settings state
     let mut group_games_by_store = use_signal(move || init_group);
@@ -552,24 +727,26 @@ pub fn App() -> Element {
 
                         if is_deployed {
                             // Reflect existing deployed configuration
+                            let mult = if g.mfg_multiplier > 0 { g.mfg_multiplier } else { 4 };
+                            mfg_multiplier.set(mult);
+                            mfg_choice.set(g.mfg_unlock_installed);
+                            nr_style_preset.set(g.nr_style);
+                            nr_style_choice.set(g.nr_style_enabled);
+
                             if g.installed_route.as_deref() == Some("optiscaler") || (g.optiscaler_installed && g.installed_route.is_none()) {
                                 backend_choice.set("optiscaler".to_string());
                                 opti_pre_sr.set(g.optiscaler_presr);
                                 opti_passes.set(if g.optiscaler_passes > 0 { g.optiscaler_passes } else { 1 });
-                                mfg_choice.set(g.mfg_unlock_installed);
                             } else if g.installed_route.as_deref() == Some("native") {
                                 backend_choice.set("reshade".to_string());
                                 route_choice.set("native".to_string());
-                                mfg_choice.set(g.mfg_unlock_installed);
                             } else if g.installed_route.as_deref() == Some("feeder") {
                                 backend_choice.set("reshade".to_string());
                                 route_choice.set("feeder".to_string());
-                                mfg_choice.set(g.mfg_unlock_installed);
                             } else if g.reshade_installed {
                                 backend_choice.set("reshade".to_string());
                                 let rec = crate::core::install_routes::recommended_route(g);
                                 route_choice.set(rec.as_str().to_string());
-                                mfg_choice.set(g.mfg_unlock_installed);
                             }
                         } else {
                             // Unmodded / Vanilla: Automatically select the best compatible path!
@@ -577,12 +754,12 @@ pub fn App() -> Element {
                             backend_choice.set("reshade".to_string());
                             route_choice.set(rec.as_str().to_string());
                             mfg_choice.set(false);
+                            mfg_multiplier.set(4);
                             opti_pre_sr.set(true);
                             opti_passes.set(1);
+                            nr_style_preset.set(0);
+                            nr_style_choice.set(true);
                         }
-
-                        nr_style_preset.set(g.nr_style);
-                        nr_style_choice.set(g.nr_style > 0);
                     }
                 }
             }
@@ -649,8 +826,6 @@ pub fn App() -> Element {
             aside {
                 class: "sidebar",
                 style: "cursor: default; user-select: none;",
-                onmousedown: move |_| { dioxus::desktop::window().drag(); },
-                ondoubleclick: move |_| { dioxus::desktop::window().toggle_maximized(); },
                 div {
                     class: "brand",
                     id: "brand",
@@ -730,6 +905,12 @@ pub fn App() -> Element {
                         span { "{crate::core::i18n::t(&current_lang.read(), \"nav_about\")}" }
                         i { class: "dot" }
                     }
+                }
+
+                div {
+                    style: "flex: 1; min-height: 24px; cursor: default; user-select: none;",
+                    onmousedown: move |_| { dioxus::desktop::window().drag(); },
+                    ondoubleclick: move |_| { dioxus::desktop::window().toggle_maximized(); },
                 }
 
                 div {
@@ -894,8 +1075,60 @@ pub fn App() -> Element {
 
                 // ---------------- HOME VIEW ----------------
                 if *active_view.read() == "home" {
-                    section { class: "view active", id: "view-home",
-                        div { class: "glass dropzone", id: "dropZone",
+                    section {
+                        class: "view active",
+                        id: "view-home",
+                        style: "cursor: default;",
+                        div {
+                            class: if *is_drag_over.read() { "glass dropzone over" } else { "glass dropzone" },
+                            id: "dropZone",
+                            style: "cursor: pointer;",
+                            onmousedown: move |e| e.stop_propagation(),
+                            ondragover: move |e| {
+                                e.prevent_default();
+                                is_drag_over.set(true);
+                            },
+                            ondragenter: move |e| {
+                                e.prevent_default();
+                                is_drag_over.set(true);
+                            },
+                            ondragleave: move |_| {
+                                is_drag_over.set(false);
+                            },
+                            ondrop: move |evt: DragEvent| {
+                                is_drag_over.set(false);
+                                if let Some(engine) = evt.files() {
+                                    let files = engine.files();
+                                    if let Some(first_path) = files.into_iter().next() {
+                                        ingest_game_or_library_path(
+                                            std::path::PathBuf::from(first_path),
+                                            games,
+                                            sheet_game_idx,
+                                            sheet_open,
+                                            active_view,
+                                            managed_folders,
+                                            status_state,
+                                            recents,
+                                        );
+                                    }
+                                }
+                            },
+                            onclick: move |_| {
+                                spawn(async move {
+                                    if let Some(handle) = rfd::AsyncFileDialog::new().set_title("Browse for game folder").pick_folder().await {
+                                        ingest_game_or_library_path(
+                                            handle.path().to_path_buf(),
+                                            games,
+                                            sheet_game_idx,
+                                            sheet_open,
+                                            active_view,
+                                            managed_folders,
+                                            status_state,
+                                            recents,
+                                        );
+                                    }
+                                });
+                            },
                             div { class: "dz-circle",
                                 dangerous_inner_html: r#"<svg viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>"#
                             }
@@ -904,41 +1137,20 @@ pub fn App() -> Element {
                             button {
                                 class: "glass-btn",
                                 id: "browseBtn",
-                                onclick: move |_| {
+                                onclick: move |e| {
+                                    e.stop_propagation();
                                     spawn(async move {
                                         if let Some(handle) = rfd::AsyncFileDialog::new().set_title("Browse for game folder").pick_folder().await {
-                                            let folder = handle.path().to_path_buf();
-                                            let maybe_game = tokio::task::spawn_blocking({
-                                                let folder = folder.clone();
-                                                move || scan_game_directory(&folder)
-                                            }).await.unwrap_or(None);
-
-                                            if let Some(game) = maybe_game {
-                                                let mut s = load_state();
-                                                s.unhide_game(&game.dir);
-                                                let f_str = folder.to_string_lossy().to_string();
-                                                if !s.manual.contains(&f_str) {
-                                                    s.manual.push(f_str.clone());
-                                                }
-                                                let mut current_games = games.read().clone();
-                                                let idx = if let Some(pos) = current_games.iter().position(|g| g.dir == game.dir) {
-                                                    current_games[pos] = game.clone();
-                                                    pos
-                                                } else {
-                                                    current_games.push(game.clone());
-                                                    current_games.len() - 1
-                                                };
-                                                s.cached_games = current_games.clone();
-                                                let _ = save_state(&s);
-                                                touch(&f_str);
-                                                games.set(current_games);
-                                                sheet_game_idx.set(Some(idx));
-                                                sheet_open.set(true);
-                                                active_view.set("games".to_string());
-                                                if game.poster.is_none() {
-                                                    trigger_artwork_resolution(games, vec![(game.name.clone(), game.dir.clone())]);
-                                                }
-                                            }
+                                            ingest_game_or_library_path(
+                                                handle.path().to_path_buf(),
+                                                games,
+                                                sheet_game_idx,
+                                                sheet_open,
+                                                active_view,
+                                                managed_folders,
+                                                status_state,
+                                                recents,
+                                            );
                                         }
                                     });
                                 },
@@ -949,8 +1161,6 @@ pub fn App() -> Element {
                         div {
                             class: "section-head",
                             style: "cursor: default; user-select: none;",
-                            onmousedown: move |_| { dioxus::desktop::window().drag(); },
-                            ondoubleclick: move |_| { dioxus::desktop::window().toggle_maximized(); },
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"home_recent_games\")}" }
                             button {
                                 class: "link",
@@ -960,10 +1170,13 @@ pub fn App() -> Element {
                                 svg { view_box: "0 0 24 24", path { d: "M9 6l6 6-6 6" } }
                             }
                         }
-                        div { class: "recents", id: "recents",
+                        div {
+                            class: "recents",
+                            id: "recents",
+                            style: "cursor: default; user-select: none;",
                             {
                                 let recent_list: Vec<(usize, GameEntry, String)> = recents.read().iter().filter_map(|r| {
-                                    let time_ago = ago(r.at);
+                                    let time_ago = ago_localized(&current_lang.read(), r.at);
                                     let matched = games.read().iter().enumerate().find(|(_, g)| {
                                         g.dir.to_string_lossy().to_lowercase() == r.dir.to_lowercase()
                                     }).map(|(idx, g)| (idx, g.clone(), time_ago.clone()));
@@ -993,6 +1206,7 @@ pub fn App() -> Element {
                                                     article {
                                                         class: "rcard",
                                                         tabindex: "0",
+                                                        onmousedown: move |e| e.stop_propagation(),
                                                         onclick: move |_| {
                                                             sheet_game_idx.set(Some(idx));
                                                             sheet_open.set(true);
@@ -1088,6 +1302,7 @@ pub fn App() -> Element {
                                             .join("\r\n");
                                         copy_to_clipboard(&text);
                                         copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_activity_copied").to_string());
+                                        *toast_generation.write() += 1;
                                         copy_toast.set(true);
                                     },
                                     "{crate::core::i18n::t(&current_lang.read(), \"btn_copy_log\")}"
@@ -1147,12 +1362,13 @@ pub fn App() -> Element {
 
                 // ---------------- GAMES VIEW ----------------
                 if *active_view.read() == "games" {
-                    section { class: "view active", id: "view-games",
+                    section {
+                        class: "view active",
+                        id: "view-games",
+                        style: "cursor: default;",
                         div {
                             class: "section-head games-heading",
                             style: "cursor: default; user-select: none;",
-                            onmousedown: move |_| { dioxus::desktop::window().drag(); },
-                            ondoubleclick: move |_| { dioxus::desktop::window().toggle_maximized(); },
                             h3 {
                                 style: "cursor: default;",
                                 span { id: "gamesTitle", "{crate::core::i18n::t(&current_lang.read(), \"nav_games\")}" }
@@ -1162,42 +1378,26 @@ pub fn App() -> Element {
                                 class: "row",
                                 onmousedown: move |e| e.stop_propagation(),
                                 button {
-                                     class: "ghost sm",
-                                     id: "addGame",
-                                     onclick: move |_| {
-                                         spawn(async move {
-                                             if let Some(handle) = rfd::AsyncFileDialog::new().set_title("Add one game").pick_folder().await {
-                                                 let folder = handle.path().to_path_buf();
-                                                 let maybe_game = tokio::task::spawn_blocking({
-                                                     let folder = folder.clone();
-                                                     move || scan_game_directory(&folder)
-                                                 }).await.unwrap_or(None);
-
-                                                 if let Some(game) = maybe_game {
-                                                     let mut s = load_state();
-                                                     s.unhide_game(&game.dir);
-                                                     let f_str = folder.to_string_lossy().to_string();
-                                                     if !s.manual.contains(&f_str) {
-                                                         s.manual.push(f_str);
-                                                     }
-                                                     let mut current_games = games.read().clone();
-                                                     current_games.push(game.clone());
-                                                     let deduped = dedupe_games(current_games);
-                                                     let idx = deduped.iter().position(|g| g.dir == game.dir).unwrap_or(0);
-                                                     s.cached_games = deduped.clone();
-                                                     let _ = save_state(&s);
-                                                     games.set(deduped);
-                                                     sheet_game_idx.set(Some(idx));
-                                                     sheet_open.set(true);
-                                                     if game.poster.is_none() {
-                                                         trigger_artwork_resolution(games, vec![(game.name.clone(), game.dir.clone())]);
-                                                     }
-                                                 }
-                                             }
-                                         });
-                                     },
-                                     "{crate::core::i18n::t(&current_lang.read(), \"add_game\")}"
-                                 }
+                                      class: "ghost sm",
+                                      id: "addGame",
+                                      onclick: move |_| {
+                                          spawn(async move {
+                                              if let Some(handle) = rfd::AsyncFileDialog::new().set_title("Add one game").pick_folder().await {
+                                                  ingest_game_or_library_path(
+                                                      handle.path().to_path_buf(),
+                                                      games,
+                                                      sheet_game_idx,
+                                                      sheet_open,
+                                                      active_view,
+                                                      managed_folders,
+                                                      status_state,
+                                                      recents,
+                                                  );
+                                              }
+                                          });
+                                      },
+                                      "{crate::core::i18n::t(&current_lang.read(), \"add_game\")}"
+                                  }
                                  button {
                                      class: "ghost sm",
                                      id: "addFolder",
@@ -1437,6 +1637,7 @@ pub fn App() -> Element {
                                                                     article {
                                                                         class: if is_dx12 { "card dx12" } else { "card" },
                                                                         tabindex: "0",
+                                                                        onmousedown: move |e| e.stop_propagation(),
                                                                         onclick: move |_| {
                                                                             sheet_game_idx.set(Some(idx));
                                                                             sheet_open.set(true);
@@ -1563,6 +1764,7 @@ pub fn App() -> Element {
                                                 article {
                                                     class: if is_dx12 { "card dx12" } else { "card" },
                                                     tabindex: "0",
+                                                    onmousedown: move |e| e.stop_propagation(),
                                                     onclick: move |_| {
                                                         sheet_game_idx.set(Some(idx));
                                                         sheet_open.set(true);
@@ -1662,7 +1864,10 @@ pub fn App() -> Element {
 
                 // ---------------- ADD-ONS VIEW ----------------
                 if *active_view.read() == "addons" {
-                    section { class: "view active", id: "view-addons",
+                    section {
+                        class: "view active",
+                        id: "view-addons",
+                        style: "cursor: default;",
                         div { class: "section-head",
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"nav_addons\")}" }
                             button {
@@ -2108,6 +2313,7 @@ pub fn App() -> Element {
                                                         s.addons = cur_act;
                                                         let _ = crate::core::state::save_state(&s);
                                                         copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_addon_removed").to_string());
+                                                        *toast_generation.write() += 1;
                                                         copy_toast.set(true);
                                                     }
                                                 },
@@ -2123,10 +2329,14 @@ pub fn App() -> Element {
 
                         // Add-on Dialog Modal
                         if *show_addon_dlg.read() {
-                            div { class: "overlay", id: "dlgOverlay",
+                            div {
+                                class: "overlay",
+                                id: "dlgOverlay",
+                                onmousedown: move |e| e.stop_propagation(),
                                 onclick: move |_| show_addon_dlg.set(false),
                                 div {
                                     class: "dialog",
+                                    onmousedown: move |e| e.stop_propagation(),
                                     onclick: move |e| e.stop_propagation(),
                                     h3 { "{crate::core::i18n::t(&current_lang.read(), \"dlg_add_addon_title\")}" }
                                     div { class: "dlg-file", id: "dlgFile", "{dlg_file_info.read()}" }
@@ -2197,6 +2407,7 @@ pub fn App() -> Element {
 
                                                 show_addon_dlg.set(false);
                                                 copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_addon_registered").to_string());
+                                                *toast_generation.write() += 1;
                                                 copy_toast.set(true);
                                                 log_message(&format!("@{{log_addon_imported|{}}}", p_val));
                                                 activity_log.set(get_session_log());
@@ -2212,7 +2423,10 @@ pub fn App() -> Element {
 
                 // ---------------- HISTORY VIEW ----------------
                 if *active_view.read() == "history" {
-                    section { class: "view active", id: "view-history",
+                    section {
+                        class: "view active",
+                        id: "view-history",
+                        style: "cursor: default;",
                         div { class: "section-head",
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"nav_history\")}" }
                             button {
@@ -2250,6 +2464,7 @@ pub fn App() -> Element {
                                     }
                                     copy_to_clipboard(&out);
                                     copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_history_copied").to_string());
+                                    *toast_generation.write() += 1;
                                     copy_toast.set(true);
                                 },
                                 "{crate::core::i18n::t(&current_lang.read(), \"btn_copy_history\")}"
@@ -2321,7 +2536,10 @@ pub fn App() -> Element {
 
                 // ---------------- SETTINGS VIEW ----------------
                 if *active_view.read() == "settings" {
-                    section { class: "view active", id: "view-settings",
+                    section {
+                        class: "view active",
+                        id: "view-settings",
+                        style: "cursor: default;",
                         div { class: "section-head",
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"nav_settings\")}" }
                         }
@@ -2551,6 +2769,7 @@ pub fn App() -> Element {
                                             hidden_count.set(0);
                                             crate::core::logger::info("library", &format!("Restored {} hidden game(s)", count));
                                             copy_toast_text.set(format!("Restored {} hidden game(s)", count));
+                                            *toast_generation.write() += 1;
                                             copy_toast.set(true);
                                         },
                                         "{crate::core::i18n::t(&current_lang.read(), \"settings_unhide_all\")}"
@@ -2572,6 +2791,7 @@ pub fn App() -> Element {
                                         managed_folders.set(Vec::new());
                                         games.set(Vec::new());
                                         copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_config_reset").to_string());
+                                        *toast_generation.write() += 1;
                                         copy_toast.set(true);
                                     },
                                     "{crate::core::i18n::t(&current_lang.read(), \"settings_reset\")}"
@@ -2601,7 +2821,10 @@ pub fn App() -> Element {
 
                 // ---------------- ABOUT VIEW ----------------
                 if *active_view.read() == "about" {
-                    section { class: "view active", id: "view-about",
+                    section {
+                        class: "view active",
+                        id: "view-about",
+                        style: "cursor: default;",
                         div { class: "section-head",
                             h3 { "{crate::core::i18n::t(&current_lang.read(), \"nav_about\")}" }
                         }
@@ -2643,10 +2866,11 @@ pub fn App() -> Element {
                         } else {
                             crate::core::i18n::t(&current_lang.read(), "val_not_installed").to_string()
                         };
-                        let mut available_exes = crate::core::scan::discover_game_exes(&target_game.dir);
-                        if available_exes.is_empty() && !target_game.available_exes.is_empty() {
-                            available_exes = target_game.available_exes.clone();
-                        }
+                        let mut available_exes = if !target_game.available_exes.is_empty() {
+                            target_game.available_exes.clone()
+                        } else {
+                            crate::core::scan::discover_game_exes(&target_game.dir)
+                        };
                         available_exes.retain(|e| !crate::core::scan::is_helper_or_tool_path(&e.path));
 
                         let is_bad_exe = crate::core::scan::is_helper_or_tool_path(&target_game.exe_path)
@@ -2691,7 +2915,7 @@ pub fn App() -> Element {
                         let opti_advisory = crate::core::install_routes::get_optiscaler_advisory(&target_game);
                         let native_advisory = crate::core::install_routes::get_native_dlss_advisory(&target_game);
                         let mfg_advisory = crate::core::install_routes::get_mfg_advisory(&target_game, primary_gpu.is_rtx_40);
-                        let ac_warning = crate::core::install_guards::has_anti_cheat(&target_game.dir);
+                        let ac_warning = target_game.has_anti_cheat;
                         let _has_dlss = target_game.dlss_version.is_some();
                         let cur_backend = backend_choice.read().clone();
                         let effective_backend = if cur_backend == "optiscaler" {
@@ -2748,7 +2972,7 @@ pub fn App() -> Element {
                             crate::core::i18n::t(&current_lang.read(), "opt_native_dlss").to_string()
                         };
                         let laa_status = if target_game.bitness == 32 {
-                            if crate::core::pe::is_large_address_aware(&target_game.exe_path) {
+                            if target_game.is_laa {
                                 " • 4GB Patch (LAA): Active"
                             } else {
                                 " • 4GB Patch (LAA): Auto on Deploy"
@@ -2767,10 +2991,12 @@ pub fn App() -> Element {
                             div {
                                 class: "overlay",
                                 id: "overlay",
+                                onmousedown: move |e| e.stop_propagation(),
                                 onclick: move |_| sheet_open.set(false),
                                 div {
                                     class: "sheet",
                                     id: "sheet",
+                                    onmousedown: move |e| e.stop_propagation(),
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
 
                                     div { class: "hero",
@@ -2780,7 +3006,11 @@ pub fn App() -> Element {
                                         button {
                                             class: "close",
                                             id: "sheetClose",
-                                            onclick: move |_| sheet_open.set(false),
+                                            onmousedown: move |e| e.stop_propagation(),
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                sheet_open.set(false);
+                                            },
                                             dangerous_inner_html: r#"<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>"#
                                         }
                                     }
@@ -2908,7 +3138,7 @@ pub fn App() -> Element {
                                                     let _ = std::process::Command::new("explorer").arg(&dir).spawn();
                                                 }
                                             },
-                                            "{target_game.dir.to_string_lossy()}"
+                                            "{crate::core::state::clean_path_separators(&target_game.dir).display()}"
                                         }
                                         if available_exes.len() > 1 {
                                             div { class: "exe-switch-row", style: "display:flex; align-items:center; gap:8px; margin:8px 0 10px 0;",
@@ -3228,15 +3458,91 @@ pub fn App() -> Element {
                                             }
                                         }
 
-                                        // Filelist
-                                        if !target_game.files.is_empty() {
-                                            div { class: "filelist",
-                                                for f in &target_game.files {
-                                                    div { class: "filerow",
-                                                        span { class: "f", "{f.rel}" }
-                                                        span { class: "v", "{f.version.as_deref().unwrap_or(\"-\")}" }
+                                        // Detected Graphics Modules (Collapsible)
+                                        {
+                                            if !target_game.files.is_empty() {
+                                                let is_exp = *modules_expanded.read();
+                                                let mod_count = target_game.files.len();
+                                                rsx! {
+                                                    div { class: "modules-collapsible",
+                                                        button {
+                                                            class: "modules-header",
+                                                            r#type: "button",
+                                                            title: "{crate::core::i18n::t(&current_lang.read(), \"tooltip_toggle_modules\")}",
+                                                            onclick: move |evt: MouseEvent| {
+                                                                evt.stop_propagation();
+                                                                let current = *modules_expanded.read();
+                                                                modules_expanded.set(!current);
+                                                            },
+                                                            span {
+                                                                class: if is_exp { "modules-chevron is-expanded" } else { "modules-chevron" },
+                                                                svg {
+                                                                    view_box: "0 0 24 24",
+                                                                    fill: "none",
+                                                                    stroke: "currentColor",
+                                                                    stroke_width: "2.8",
+                                                                    stroke_linecap: "round",
+                                                                    stroke_linejoin: "round",
+                                                                    polyline { points: "9 18 15 12 9 6" }
+                                                                }
+                                                            }
+                                                            span { class: "modules-title",
+                                                                "{crate::core::i18n::t(&current_lang.read(), \"sheet_detected_modules\")} ({mod_count})"
+                                                            }
+                                                            if !is_exp {
+                                                                div { class: "summary-badges",
+                                                                    for f in target_game.files.iter().take(4) {
+                                                                        {
+                                                                            let (_, _, vendor_class, badge_text) = resolve_module_meta(&f.rel);
+                                                                            let ver_short = f.version.as_deref().map(|v| {
+                                                                                let parts: Vec<&str> = v.split('.').take(2).collect();
+                                                                                if parts.len() == 2 {
+                                                                                    format!(" {}.{}", parts[0], parts[1])
+                                                                                } else {
+                                                                                    format!(" {}", v)
+                                                                                }
+                                                                            }).unwrap_or_default();
+                                                                            rsx! {
+                                                                                span { class: "summary-pill {vendor_class}",
+                                                                                    "{badge_text}{ver_short}"
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    if mod_count > 4 {
+                                                                        span { class: "summary-pill", "+{mod_count - 4}" }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        if is_exp {
+                                                            div { class: "modules-body",
+                                                                for f in &target_game.files {
+                                                                    {
+                                                                        let (name_key, vendor_tag, vendor_class, _) = resolve_module_meta(&f.rel);
+                                                                        let title = crate::core::i18n::t(&current_lang.read(), name_key);
+                                                                        let ver_text = f.version.as_deref().unwrap_or("-");
+                                                                        let ver_class = if f.version.is_some() { "module-version-pill" } else { "module-version-pill unknown" };
+                                                                        rsx! {
+                                                                            div { class: "module-card",
+                                                                                div { class: "module-main",
+                                                                                    div { class: "module-title-row",
+                                                                                        span { class: "vendor-badge {vendor_class}", "{vendor_tag}" }
+                                                                                        span { class: "module-name", "{title}" }
+                                                                                    }
+                                                                                    span { class: "module-path", "{f.rel}" }
+                                                                                }
+                                                                                span { class: "{ver_class}", "{ver_text}" }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
+                                            } else {
+                                                rsx! {}
                                             }
                                         }
 
@@ -3260,7 +3566,8 @@ pub fn App() -> Element {
                                                             let opti_passes_val = *opti_passes.read();
                                                             let mfg_choice_val = *mfg_choice.read();
                                                             let mfg_multiplier_val = *mfg_multiplier.read();
-                                                            let nr_style_val = if *nr_style_choice.read() { *nr_style_preset.read() } else { 0 };
+                                                            let nr_style_choice_val = *nr_style_choice.read();
+                                                            let nr_style_val = if nr_style_choice_val { *nr_style_preset.read() } else { 0 };
                                                             move |_| {
                                                                 if *is_busy.read() {
                                                                     return;
@@ -3273,7 +3580,7 @@ pub fn App() -> Element {
 
                                                                 dioxus::prelude::spawn(async move {
                                                                     let mut lines = Vec::new();
-                                                                    lines.push(format!("--- installing DLSS 5 onto {} ---", target_game.name));
+                                                                    lines.push(format!("@{{log_deploy_start|{}}}", target_game.name));
                                                                     job_lines.set(lines.clone());
 
                                                                     let game_dir = target_game.dir.clone();
@@ -3293,7 +3600,7 @@ pub fn App() -> Element {
                                                                     }
 
                                                                     let mod_root = managed_mod_root(&game_dir, Some(&exe_path)).unwrap_or_else(|| game_dir.clone());
-                                                                    lines.push(format!("[ROUTING] Target mod directory: {}", mod_root.display()));
+                                                                    lines.push(format!("@{{log_routing_target|{}}}", mod_root.display()));
                                                                     job_lines.set(lines.clone());
 
                                                                     let deploy_opts = crate::core::optiscaler::DeployOptions {
@@ -3306,6 +3613,7 @@ pub fn App() -> Element {
                                                                         mfg_unlock: mfg_choice_val,
                                                                         mfg_multiplier: mfg_multiplier_val,
                                                                         nr_style: nr_style_val,
+                                                                        nr_style_enabled: nr_style_choice_val,
                                                                     };
 
                                                                     // Asynchronously fetch/verify Feeder components and latest MFG unlock if required
@@ -3431,6 +3739,8 @@ pub fn App() -> Element {
                                                                                 updated_game.installed_route = Some("feeder".to_string());
                                                                             }
                                                                             updated_game.nr_style = nr_style_val;
+                                                                            updated_game.nr_style_enabled = nr_style_choice_val;
+                                                                            updated_game.mfg_multiplier = mfg_multiplier_val;
                                                                             updated_game.has_backup = true;
 
                                                                             let mut current_games = games.read().clone();
@@ -3459,7 +3769,7 @@ pub fn App() -> Element {
                                                              if *is_busy.read() {
                                                                  crate::core::i18n::t(&current_lang.read(), "btn_working").to_string()
                                                              } else if has_override {
-                                                                 "Deploy Anyway (Force Override) ⚠️".to_string()
+                                                                 crate::core::i18n::t(&current_lang.read(), "btn_deploy_override").to_string()
                                                              } else if is_deployed {
                                                                  crate::core::i18n::t(&current_lang.read(), "sheet_deploy").to_string()
                                                              } else {
@@ -3500,7 +3810,7 @@ pub fn App() -> Element {
                                                                             return;
                                                                         }
 
-                                                                        lines.push(format!("--- restoring {} ---", target_game.name));
+                                                                        lines.push(format!("@{{log_restore_start|{}}}", target_game.name));
                                                                         job_lines.set(lines.clone());
 
                                                                         let res = tokio::task::spawn_blocking({
@@ -3510,7 +3820,7 @@ pub fn App() -> Element {
 
                                                                         match res {
                                                                             Ok(Ok(true)) => {
-                                                                                lines.push("[RESTORE] Originals restored from _DLSS5_Backup".to_string());
+                                                                                lines.push("@{log_restore_success}".to_string());
                                                                                 let _ = append_history(&HistoryRow {
                                                                                     date: crate::core::journal::now_timestamp_str(),
                                                                                     dir: target_game.dir.to_string_lossy().to_string(),
@@ -3561,7 +3871,7 @@ pub fn App() -> Element {
                                                                                 let _ = save_state(&s);
                                                                             }
                                                                             _ => {
-                                                                                lines.push("[RESTORE] No backup manifest found or error restoring".to_string());
+                                                                                lines.push("@{log_restore_no_backup}".to_string());
                                                                             }
                                                                         }
                                                                         job_lines.set(lines);
@@ -3603,7 +3913,7 @@ pub fn App() -> Element {
                                                                             return;
                                                                         }
 
-                                                                        lines.push(format!("--- removing mod files from {} ---", target_game.name));
+                                                                        lines.push(format!("@{{log_clean_start|{}}}", target_game.name));
                                                                         job_lines.set(lines.clone());
 
                                                                         let res = tokio::task::spawn_blocking({
@@ -3615,9 +3925,9 @@ pub fn App() -> Element {
                                                                         match res {
                                                                             Ok(Ok(removed)) => {
                                                                                 for r in &removed {
-                                                                                    lines.push(format!("[CLEAN] Removed {}", r));
+                                                                                    lines.push(format!("@{{log_clean_removed|{}}}", r));
                                                                                 }
-                                                                                lines.push(format!("[CLEAN] Purged {} mod item(s)", removed.len()));
+                                                                                lines.push(format!("@{{log_clean_purged|{}}}", removed.len()));
                                                                                 let _ = append_history(&HistoryRow {
                                                                                     date: crate::core::journal::now_timestamp_str(),
                                                                                     dir: target_game.dir.to_string_lossy().to_string(),
@@ -3690,9 +4000,15 @@ pub fn App() -> Element {
                                         button {
                                             class: "ghost sm",
                                             onclick: move |_| {
-                                                let text = job_lines.read().join("\r\n");
+                                                let lang = current_lang.read().clone();
+                                                let text = job_lines.read()
+                                                    .iter()
+                                                    .map(|l| crate::core::i18n::format_log_entry(&lang, l))
+                                                    .collect::<Vec<String>>()
+                                                    .join("\r\n");
                                                 copy_to_clipboard(&text);
                                                 copy_toast_text.set(crate::core::i18n::t(&current_lang.read(), "toast_activity_copied").to_string());
+                                                *toast_generation.write() += 1;
                                                 copy_toast.set(true);
                                             },
                                             "{crate::core::i18n::t(&current_lang.read(), \"btn_copy_log\")}"
@@ -3700,7 +4016,12 @@ pub fn App() -> Element {
                                     }
                                     div { class: "job-body", style: "font-family:monospace; font-size:0.85em; background:rgba(0,0,0,0.4); padding:10px; border-radius:6px; max-height:120px; overflow-y:auto;",
                                         for line in job_lines.read().iter() {
-                                            div { "{line}" }
+                                            {
+                                                let rendered_line = crate::core::i18n::format_log_entry(&current_lang.read(), line);
+                                                rsx! {
+                                                    div { "{rendered_line}" }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -3717,10 +4038,12 @@ pub fn App() -> Element {
                 div {
                     class: "overlay",
                     style: "display:flex; justify-content:center; align-items:center; z-index:9999;",
+                    onmousedown: move |e| e.stop_propagation(),
                     onclick: move |_| overlay_hotkey_open.set(false),
                     div {
                         class: "glass pad",
                         style: "width: 360px; max-width:90%; background: #181b20; border: 1px solid var(--line); border-radius: 8px; padding: 20px;",
+                        onmousedown: move |e| e.stop_propagation(),
                         onclick: move |e| e.stop_propagation(),
                         h4 { style: "margin-top:0; margin-bottom: 8px;", "{crate::core::i18n::t(&current_lang.read(), \"hotkey_dialog_title\")}" }
                         p { class: "hint", style: "margin-bottom:16px; font-size:0.85em;", "Select the shortcut to toggle HUD in-game:" }
@@ -3762,10 +4085,12 @@ pub fn App() -> Element {
                 div {
                     class: "overlay",
                     style: "display:flex; justify-content:center; align-items:center; z-index:9999;",
+                    onmousedown: move |e| e.stop_propagation(),
                     onclick: move |_| overlay_create_open.set(false),
                     div {
                         class: "glass pad",
                         style: "width: 400px; max-width:90%; background: #181b20; border: 1px solid var(--line); border-radius: 8px; padding: 24px;",
+                        onmousedown: move |e| e.stop_propagation(),
                         onclick: move |e| e.stop_propagation(),
                         h4 { style: "margin-top:0; margin-bottom: 6px;", "{crate::core::i18n::t(&current_lang.read(), \"theme_create_title\")}" }
                         p { class: "hint", style: "margin-bottom:16px; font-size:0.85em;", "{crate::core::i18n::t(&current_lang.read(), \"theme_create_hint\")}" }
@@ -3861,11 +4186,13 @@ pub fn App() -> Element {
                         div {
                             class: "overlay",
                             style: "display:flex; justify-content:center; align-items:center; z-index:9999; overflow-y:auto; padding:20px 0;",
+                            onmousedown: move |e| e.stop_propagation(),
                             onclick: move |_| overlay_preview_open.set(false),
                             div {
                                 class: "ol-dialog",
                                 style: format!("--ol-accent:{}; --ol-soft:{}; --ol-back:{}; --ol-bright:{}; margin:auto;", p_accent, p_soft, p_back, p_bright),
                                 "data-overlay-theme": "{p_attr}",
+                                onmousedown: move |e| e.stop_propagation(),
                                 onclick: move |e| e.stop_propagation(),
                                 div { class: "ol-dialog-head",
                                     h3 { "{crate::core::i18n::t(&current_lang.read(), \"preview_dialog_title\")} • {p_name}" }
@@ -4034,8 +4361,8 @@ pub fn App() -> Element {
             // Toast feedback
             if *copy_toast.read() {
                 div {
-                    class: "copy-feedback",
-                    style: "position:fixed; bottom:24px; right:24px; background:var(--accent); color:#fff; padding:8px 16px; border-radius:6px; z-index:99999;",
+                    class: "copy-feedback toast-anim",
+                    title: "{crate::core::i18n::t(&current_lang.read(), \"tooltip_dismiss\")}",
                     onclick: move |_| copy_toast.set(false),
                     "{copy_toast_text}"
                 }
@@ -4266,6 +4593,10 @@ mod tests {
         assert_eq!(format_status("en", &AppStatus::FoundGames(8)), "Found 8 games across sources");
         assert_eq!(format_status("de", &AppStatus::FoundGames(12)), "12 Spiele plattformübergreifend gefunden");
         assert_eq!(format_status("zh", &AppStatus::FoundGames(5)), "共发现 5 款已安装游戏");
+        assert_eq!(format_status("en", &AppStatus::NoGamesFound("Documents".to_string())), "No supported game executables found in Documents");
+        assert_eq!(format_status("de", &AppStatus::NoGamesFound("Downloads".to_string())), "Keine unterstützten Spieldateien in Downloads gefunden");
+        assert_eq!(format_status("en", &AppStatus::AddedGame("Cyberpunk 2077".to_string())), "Added Cyberpunk 2077");
+        assert_eq!(format_status("de", &AppStatus::AddedGame("Cyberpunk 2077".to_string())), "Cyberpunk 2077 hinzugefügt");
     }
 
     #[test]
@@ -4310,6 +4641,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(recommended_route(&dx9_game), InstallRoute::Feeder);
+    }
+
+    #[test]
+    fn test_resolve_module_meta() {
+        assert_eq!(resolve_module_meta("nvngx_dlss.dll"), ("module_dlss_sr", "NVIDIA", "vendor-nvidia", "DLSS"));
+        assert_eq!(resolve_module_meta("bin\\x64\\nvngx_dlssg.dll"), ("module_dlss_fg", "NVIDIA", "vendor-nvidia", "DLSS-G"));
+        assert_eq!(resolve_module_meta("nvngx_dlssd.dll"), ("module_dlss_rr", "NVIDIA", "vendor-nvidia", "DLSS-RR"));
+        assert_eq!(resolve_module_meta("amd_fidelityfx_framegeneration_dx12.dll"), ("module_fsr_fg", "AMD", "vendor-amd", "FSR FG"));
+        assert_eq!(resolve_module_meta("sl.dlss.dll"), ("module_sl_dlss", "Streamline", "vendor-sl", "SL DLSS"));
+        assert_eq!(resolve_module_meta("sl.dlss_g.dll"), ("module_sl_fg", "Streamline", "vendor-sl", "SL FG"));
+        assert_eq!(resolve_module_meta("sl.common.dll"), ("module_sl_core", "Streamline", "vendor-sl", "SL Core"));
+        assert_eq!(resolve_module_meta("sl.interposer.dll"), ("module_sl_core", "Streamline", "vendor-sl", "SL Core"));
+        assert_eq!(resolve_module_meta("sl.reflex.dll"), ("module_sl_reflex", "Streamline", "vendor-sl", "Reflex"));
+        assert_eq!(resolve_module_meta("optiscaler/dxgi.dll"), ("module_optiscaler", "OptiScaler", "vendor-opti", "OptiScaler"));
+        assert_eq!(resolve_module_meta("some_other.dll"), ("module_generic_dll", "Runtime", "vendor-generic", "DLL"));
     }
 }
 

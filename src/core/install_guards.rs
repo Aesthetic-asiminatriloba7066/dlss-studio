@@ -6,7 +6,6 @@ use windows::Win32::Foundation::CloseHandle;
 
 #[derive(Debug, Clone)]
 pub struct ProcessMatch {
-    pub pid: u32,
     pub name: String,
 }
 
@@ -22,7 +21,6 @@ pub fn get_running_processes() -> Vec<ProcessMatch> {
                     let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
                     let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
                     matches.push(ProcessMatch {
-                        pid: entry.th32ProcessID,
                         name,
                     });
 

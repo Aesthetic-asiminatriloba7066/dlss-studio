@@ -1,25 +1,25 @@
-# DLSS 5 Studio v1.0.6 ⚡
+# DLSS 5 Studio v1.0.7 ⚡
 
-> **Route advisory engine, high-contrast incompatibility warnings, unrestricted force override deployment, automatic deployment state reflection, and intelligent optimal path selection.**
+> **Window drag modal event fix across all screens, theme-harmonious squircle accordion trigger, high-contrast Light Theme contrast & badges, 2-second copy toast auto-dismiss timer, and complete multilingual translation coverage.**
 
 ---
 
 ### 🚀 Highlights & Improvements
 
-- **Route Advisory & Force Override Engine**:
-  - Replaced hard-blocking route restrictions with an interactive advisory model.
-  - All backends (**ReShade**, **OptiScaler**) and routes (**DLSS 5 Feeder**, **Native DLSS**) remain fully selectable for every game in your library.
-  - Selecting an incompatible combination displays a prominent crimson alert card (**`🚨 High Incompatibility Warning`**) outlining exact technical reasons and recommended alternatives.
-  - Advanced users can bypass warnings at any time using the crimson **`Deploy Anyway (Force Override) ⚠️`** action.
-- **Automatic Deployment State Reflection**:
-  - Opening the game detail sheet now queries active game installations on disk and faithfully restores all UI controls (**Backend**, **Route**, **Pre-SR**, **Passes**, **4x MFG**, and **Neural Rendering Style**) to reflect what is actually deployed instead of resetting to defaults.
-- **Intelligent Optimal Path Auto-Selection (Vanilla Games)**:
-  - Opening an unmodded game automatically selects the optimal compatible route based on its detected graphics API and bitness:
-    - **DirectX 11, Vulkan, OpenGL, DirectX 9, or non-DLSS**: Automatically defaults to **DLSS 5 Feeder** (no false warnings).
-    - **64-Bit DirectX 12 with native DLSS**: Defaults to **Native DLSS**.
-    - **4x Multi-Frame Generation**: Defaults to off for vanilla titles.
-- **Dynamic Executable Switching (Unpatched Games Only)**:
-  - Switching between game executables in the dropdown automatically updates the route to match the chosen executable's optimal API path if the title is unpatched. If an active deployment already exists, settings are strictly preserved.
+- **Window Drag Event Fix Across All Screens**:
+  - Resolved an issue where clicks, toggles, and switches on **Add-ons**, **History**, **Settings**, and **About** screens failed to register.
+  - Bounded window dragging strictly to designated header surfaces (`.toolbar`, `.brand`, and empty sidebar spacer) with native CSS drag regions (`-webkit-app-region: drag` and `no-drag !important`).
+- **Theme-Harmonious Accordion Trigger (Detected Graphics Modules)**:
+  - Replaced the mismatched circular glowing coin with a **20×20px rounded squircle (`border-radius: 6px`)** that mirrors the shape, scale, and left-alignment of the feature checkboxes directly above it (`chkNrStyle`, `chkMfg`).
+  - Rendered with a razor-sharp 12×12px SVG chevron polyline (`stroke-width: 2.8px`) that smoothly rotates 90° on expand.
+- **High-Contrast Light Theme Styling**:
+  - Eliminated blurry yellow glow washes on white backgrounds.
+  - Added dedicated high-contrast light theme colors for the chevron (`#9a3412` rust with `#b45309` border) and summary badges (NVIDIA, AMD, Streamline, OptiScaler).
+- **Toast Feedback 2-Second Auto-Dismiss Timer**:
+  - Added an automatic 2000ms dismiss timer with debounced multi-click reset and micro-animation for all copy actions across the application.
+- **Complete Multilingual Translation & Terminal Status**:
+  - Localized the execution log terminal status (`@{status_ready}`) and added complete translations across all 13 supported languages.
+  - Cleaned up obsolete emulator references and refined modular engine runtime detection.
 
 ---
 
@@ -27,12 +27,22 @@
 
 | File | Type | Description |
 | :--- | :--- | :--- |
-| **`dlss-studio-v1.0.6-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
-| **`dlss-studio-v1.0.6-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
+| **`dlss-studio-v1.0.7-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
+| **`dlss-studio-v1.0.7-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
 
 ---
 
 ### 📜 Previous Releases
+
+<details>
+<summary><b>DLSS 5 Studio v1.0.6 — Route Advisory Engine & Deployment Reflection Release</b></summary>
+
+- **Route Advisory & Force Override Engine**: Interactive advisory model with high incompatibility warnings and force override deployment.
+- **Automatic Deployment State Reflection**: Restores UI controls from disk inspection.
+- **Intelligent Optimal Path Auto-Selection**: Automatic optimal route selection for vanilla games.
+- **Dynamic Executable Switching**: Route updates dynamically on executable switch for unpatched titles.
+
+</details>
 
 <details>
 <summary><b>DLSS 5 Studio v1.0.5 — Graphics API Detection & Non-Game Filtering Release</b></summary>

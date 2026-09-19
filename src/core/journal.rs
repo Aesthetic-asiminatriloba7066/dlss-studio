@@ -48,6 +48,18 @@ pub struct ActiveManifest {
     pub added: Vec<String>,
     #[serde(default)]
     pub added_dirs: Vec<String>,
+    #[serde(default)]
+    pub mfg_unlock: Option<bool>,
+    #[serde(default)]
+    pub mfg_multiplier: Option<u32>,
+    #[serde(default)]
+    pub nr_style_enabled: Option<bool>,
+    #[serde(default)]
+    pub nr_style: Option<usize>,
+    #[serde(default)]
+    pub opti_presr: Option<bool>,
+    #[serde(default)]
+    pub opti_passes: Option<u32>,
 }
 
 fn default_manifest_version() -> u32 { 1 }
@@ -64,6 +76,12 @@ impl Default for ActiveManifest {
             replaced: Vec::new(),
             added: Vec::new(),
             added_dirs: Vec::new(),
+            mfg_unlock: None,
+            mfg_multiplier: None,
+            nr_style_enabled: None,
+            nr_style: None,
+            opti_presr: None,
+            opti_passes: None,
         }
     }
 }

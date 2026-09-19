@@ -115,7 +115,7 @@ pub fn get_mfg_advisory(game: &GameEntry, is_rtx_40: bool) -> Option<RouteAdviso
     let is_vulkan = api_lower.contains("vulkan");
     let is_dx12 = api_lower.contains("12") || api_lower.contains("d3d12");
 
-    if !game.has_frame_generation && !game.mfg_unlock_installed {
+    if !game.has_frame_generation {
         if is_dx11 {
             reasons.push("DirectX 11 Limitation: Injected Frame Generation requires DirectX 12 or Vulkan Streamline.".to_string());
         } else if !is_vulkan && !is_dx12 {
@@ -124,7 +124,7 @@ pub fn get_mfg_advisory(game: &GameEntry, is_rtx_40: bool) -> Option<RouteAdviso
             reasons.push("Missing Native DLSS-G: Game does not have native Frame Generation / Streamline hooks. Injected MFG will remain dormant.".to_string());
         }
     }
-    if !is_rtx_40 && !game.mfg_unlock_installed {
+    if !is_rtx_40 {
         reasons.push("Hardware Requirement: 4x MFG unlock requires an RTX 40-Series GPU (Ada Lovelace architecture).".to_string());
     }
 
@@ -319,6 +319,9 @@ mod tests {
             available_exes: Vec::new(),
             is_laa: false,
             nr_style: 0,
+            nr_style_enabled: false,
+            mfg_multiplier: 4,
+            has_anti_cheat: false,
         }
     }
 
@@ -498,6 +501,18 @@ mod tests {
         assert!(get_optiscaler_advisory(&g).is_none());
         assert!(get_native_dlss_advisory(&g).is_none());
         assert!(get_mfg_advisory(&g, true).is_none());
+    }
+
+    #[test]
+    fn test_mfg_advisory_persists_on_incompatible_api_even_when_mfg_unlock_installed() {
+        // Baldur's Gate 3 DX11 scenario: DirectX 11, 64-bit, DLSS present, NO native FG
+        let mut g = make_test_game("DirectX 11", 64, Some("3.7.0"));
+        g.name = "Baldurs Gate 3".to_string();
+        g.has_frame_generation = false;
+        g.mfg_unlock_installed = true; // Force-override previously deployed!
+
+        let adv = get_mfg_advisory(&g, true).expect("MFG advisory must still be reported on DirectX 11 even if mfg_unlock_installed is true");
+        assert!(adv.reasons.iter().any(|r| r.contains("DirectX 11 Limitation")), "Must report DirectX 11 Limitation");
     }
 }
 

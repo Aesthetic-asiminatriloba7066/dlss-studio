@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "dlss5-swapper-rust"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "base64",
  "dioxus",
