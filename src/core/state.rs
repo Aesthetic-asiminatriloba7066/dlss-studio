@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use sha2::{Sha256, Digest};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScanCacheEntry {
@@ -118,7 +117,7 @@ pub fn default_run_in_background() -> bool {
 }
 
 fn default_theme() -> String { "dark".to_string() }
-fn default_lang() -> String { "en".to_string() }
+fn default_lang() -> String { crate::core::i18n::detect_system_language() }
 fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 fn default_overlay_theme() -> String { "green".to_string() }
@@ -161,6 +160,19 @@ pub fn normalize_game_path(p: &std::path::Path) -> String {
     normalize_path_str(&p.to_string_lossy())
 }
 
+pub fn clean_path_separators(p: &std::path::Path) -> PathBuf {
+    let s = p.to_string_lossy().replace('/', "\\");
+    let trimmed = s.trim_end_matches('\\');
+    if trimmed.len() >= 2 && trimmed.as_bytes()[1] == b':' {
+        let mut chars = trimmed.chars();
+        let drive = chars.next().unwrap().to_ascii_uppercase();
+        let rest: String = chars.collect();
+        PathBuf::from(format!("{}{}", drive, rest))
+    } else {
+        PathBuf::from(trimmed)
+    }
+}
+
 impl AppState {
     pub fn get_custom_name(&self, dir: &std::path::Path) -> Option<&String> {
         let norm = normalize_game_path(dir);
@@ -175,11 +187,6 @@ impl AppState {
         } else {
             self.custom_names.insert(norm, trimmed.to_string());
         }
-    }
-
-    pub fn remove_custom_name(&mut self, dir: &std::path::Path) {
-        let norm = normalize_game_path(dir);
-        self.custom_names.remove(&norm);
     }
 
     pub fn is_hidden(&self, dir: &std::path::Path) -> bool {
@@ -204,14 +211,6 @@ impl AppState {
     pub fn unhide_all(&mut self) {
         self.hidden.clear();
     }
-}
-
-pub fn key_for(dir: &str) -> String {
-    let lower = dir.trim().to_lowercase().replace('/', "\\");
-    let mut hasher = Sha256::new();
-    hasher.update(lower.as_bytes());
-    let res = hex::encode(hasher.finalize());
-    res[..16].to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -339,7 +338,30 @@ pub fn load_state() -> AppState {
         return default_st;
     }
     if let Ok(content) = fs::read_to_string(&path) {
-        if let Ok(state) = serde_json::from_str::<AppState>(&content) {
+        if let Ok(mut state) = serde_json::from_str::<AppState>(&content) {
+            let mut changed = false;
+            for game in &mut state.cached_games {
+                let cleaned_dir = clean_path_separators(&game.dir);
+                if cleaned_dir != game.dir {
+                    game.dir = cleaned_dir;
+                    changed = true;
+                }
+                let cleaned_exe = clean_path_separators(&game.exe_path);
+                if cleaned_exe != game.exe_path {
+                    game.exe_path = cleaned_exe;
+                    changed = true;
+                }
+                for opt in &mut game.available_exes {
+                    let cleaned_opt = clean_path_separators(&opt.path);
+                    if cleaned_opt != opt.path {
+                        opt.path = cleaned_opt;
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                let _ = save_state(&state);
+            }
             return state;
         }
     }
@@ -368,25 +390,27 @@ pub fn touch(dir: &str) {
     let _ = save_state(&state);
 }
 
-pub fn ago(ts_ms: u64) -> String {
+pub fn ago_localized(lang: &str, ts_ms: u64) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let diff_s = if now_ms > ts_ms { (now_ms - ts_ms) / 1000 } else { 0 };
     if diff_s < 60 {
-        "just now".to_string()
+        crate::core::i18n::t(lang, "time_just_now").to_string()
     } else if diff_s < 3600 {
-        format!("{}m ago", diff_s / 60)
+        crate::core::i18n::t_param(lang, "time_minutes_ago", &(diff_s / 60).to_string())
     } else if diff_s < 86400 {
-        format!("{}h ago", diff_s / 3600)
+        crate::core::i18n::t_param(lang, "time_hours_ago", &(diff_s / 3600).to_string())
     } else if diff_s < 172800 {
-        "yesterday".to_string()
+        crate::core::i18n::t(lang, "time_yesterday").to_string()
     } else {
-        format!("{}d ago", diff_s / 86400)
+        crate::core::i18n::t_param(lang, "time_days_ago", &(diff_s / 86400).to_string())
     }
 }
 
 use std::sync::Mutex;
 static SESSION_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+#[cfg(test)]
 pub static STATE_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 pub fn log_message(msg: &str) {
@@ -427,6 +451,7 @@ pub fn is_addon_active(state: &AppState, id: &str) -> bool {
     state.addons.iter().any(|a| a == id)
 }
 
+#[cfg(test)]
 pub fn toggle_addon_in_state(state: &mut AppState, id: &str, active: bool) {
     // Base add-ons are mandatory and cannot be deactivated
     if id == "builtin:renodx" || id == "builtin:mfgunlock" || id == "builtin:feeder" {
@@ -448,6 +473,7 @@ pub fn toggle_addon_in_state(state: &mut AppState, id: &str, active: bool) {
     }
 }
 
+#[cfg(test)]
 pub fn add_custom_addon(state: &mut AppState, entry: AddonFileEntry) {
     state.addon_files.retain(|e| e.path != entry.path);
     if !state.addons.contains(&entry.path) {
@@ -456,6 +482,7 @@ pub fn add_custom_addon(state: &mut AppState, entry: AddonFileEntry) {
     state.addon_files.push(entry);
 }
 
+#[cfg(test)]
 pub fn remove_custom_addon(state: &mut AppState, path: &str) {
     state.addon_files.retain(|e| e.path != path);
     state.addons.retain(|a| a != path);
@@ -531,6 +558,9 @@ mod tests {
             available_exes: Vec::new(),
             is_laa: true,
             nr_style: 0,
+            nr_style_enabled: false,
+            mfg_multiplier: 4,
+            has_anti_cheat: false,
         };
         state.cached_games.push(game.clone());
         assert!(!state.is_hidden(&game_dir));
@@ -594,9 +624,8 @@ mod tests {
         state.set_custom_name(game_dir, "   ");
         assert_eq!(state.get_custom_name(game_dir), None);
 
-        // Remove method
         state.set_custom_name(game_dir, "Temporary");
-        state.remove_custom_name(game_dir);
+        state.set_custom_name(game_dir, "");
         assert_eq!(state.get_custom_name(game_dir), None);
     }
 
@@ -669,5 +698,88 @@ mod tests {
             Some(r"C:\Users\Tester\AppData\Roaming"),
         );
         assert_eq!(res, std::path::PathBuf::from(r"C:\ProgramData\dlss-5-studio"));
+    }
+
+    #[test]
+    fn test_ago_localized_multilingual() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+
+        // 30 seconds ago
+        let t_just_now = now_ms.saturating_sub(30 * 1000);
+        assert_eq!(super::ago_localized("en", t_just_now), "just now");
+        assert_eq!(super::ago_localized("ru", t_just_now), "только что");
+        assert_eq!(super::ago_localized("de", t_just_now), "gerade eben");
+        assert_eq!(super::ago_localized("zh", t_just_now), "刚刚");
+
+        // 10 minutes ago
+        let t_10m = now_ms.saturating_sub(10 * 60 * 1000);
+        assert_eq!(super::ago_localized("en", t_10m), "10m ago");
+        assert_eq!(super::ago_localized("ru", t_10m), "10 мин назад");
+        assert_eq!(super::ago_localized("de", t_10m), "vor 10 Min.");
+        assert_eq!(super::ago_localized("zh", t_10m), "10分钟前");
+
+        // 2 hours ago
+        let t_2h = now_ms.saturating_sub(2 * 3600 * 1000);
+        assert_eq!(super::ago_localized("en", t_2h), "2h ago");
+        assert_eq!(super::ago_localized("ru", t_2h), "2 ч назад");
+        assert_eq!(super::ago_localized("de", t_2h), "vor 2 Std.");
+        assert_eq!(super::ago_localized("zh", t_2h), "2小时前");
+
+        // 1 day ago (yesterday)
+        let t_yest = now_ms.saturating_sub(25 * 3600 * 1000);
+        assert_eq!(super::ago_localized("en", t_yest), "yesterday");
+        assert_eq!(super::ago_localized("ru", t_yest), "вчера");
+        assert_eq!(super::ago_localized("de", t_yest), "gestern");
+        assert_eq!(super::ago_localized("zh", t_yest), "昨天");
+
+        // 3 days ago
+        let t_3d = now_ms.saturating_sub(3 * 86400 * 1000);
+        assert_eq!(super::ago_localized("en", t_3d), "3d ago");
+        assert_eq!(super::ago_localized("ru", t_3d), "3 дн назад");
+        assert_eq!(super::ago_localized("de", t_3d), "vor 3 Tagen");
+        assert_eq!(super::ago_localized("zh", t_3d), "3天前");
+    }
+
+    #[test]
+    fn test_language_persists_across_serialization() {
+        let default_state = AppState::default();
+        assert!(!default_state.lang.is_empty(), "Default language must not be empty");
+
+        // Explicitly set language
+        let mut custom_state = AppState::default();
+        custom_state.lang = "de".to_string();
+
+        let json = serde_json::to_string(&custom_state).expect("serialize state");
+        let restored: AppState = serde_json::from_str(&json).expect("deserialize state");
+        assert_eq!(restored.lang, "de", "Explicit user language selection must persist across serialization");
+    }
+
+    #[test]
+    fn test_clean_path_separators_mixed_slashes_and_drive_casing() {
+        let raw = std::path::Path::new("d:/program files (x86)/steam\\steamapps\\common\\left 4 dead");
+        let cleaned = super::clean_path_separators(raw);
+        assert_eq!(
+            cleaned,
+            std::path::PathBuf::from(r"D:\program files (x86)\steam\steamapps\common\left 4 dead")
+        );
+
+        let trailing = std::path::Path::new("c:/games/test/");
+        assert_eq!(super::clean_path_separators(trailing), std::path::PathBuf::from(r"C:\games\test"));
+    }
+
+    #[test]
+    fn test_clean_path_separators_edge_cases() {
+        let rel = std::path::Path::new("games/steam/left 4 dead");
+        assert_eq!(super::clean_path_separators(rel), std::path::PathBuf::from(r"games\steam\left 4 dead"));
+
+        let empty = std::path::Path::new("");
+        assert_eq!(super::clean_path_separators(empty), std::path::PathBuf::from(""));
+
+        let drive_only = std::path::Path::new("e:/");
+        assert_eq!(super::clean_path_separators(drive_only), std::path::PathBuf::from("E:"));
+
+        let unc = std::path::Path::new(r"\\server\share/games\steam");
+        assert_eq!(super::clean_path_separators(unc), std::path::PathBuf::from(r"\\server\share\games\steam"));
     }
 }

@@ -518,6 +518,15 @@ button, input, select, textarea {
 /* ---------------- main ---------------- */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
+/* App window drag regions */
+.toolbar, .brand {
+  -webkit-app-region: drag;
+}
+
+button, input, select, textarea, a, .view, .sheet, .overlay, .lang-menu, .exe-menu, .status-card, .search-wrap, .filter-chip {
+  -webkit-app-region: no-drag !important;
+}
+
 .toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 4px 6px 16px; flex: none; }
 .round, .pill {
   border: 1px solid var(--stroke);
@@ -1040,6 +1049,242 @@ button, input, select, textarea {
 .filerow .f { color: var(--muted); font-family: Consolas, monospace; word-break: break-all; }
 .filerow .v { color: var(--dim); white-space: nowrap; }
 
+/* ---------------- detected graphics modules ---------------- */
+.modules-collapsible {
+  margin-top: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+.modules-collapsible:hover {
+  border-color: var(--line);
+}
+.modules-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+.modules-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.modules-chevron {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f59e0b;
+  flex-shrink: 0;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.modules-chevron svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2.8px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modules-header:hover .modules-chevron {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+}
+.modules-chevron.is-expanded svg {
+  transform: rotate(90deg);
+}
+
+/* Light Theme overrides for crisp visibility & theme harmony */
+:root[data-theme="light"] .modules-chevron {
+  background: rgba(180, 83, 9, 0.08);
+  border: 1.5px solid #b45309;
+  color: #9a3412;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+:root[data-theme="light"] .modules-header:hover .modules-chevron {
+  background: rgba(180, 83, 9, 0.16);
+  border-color: #7c2d12;
+  color: #7c2d12;
+}
+.modules-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+}
+.summary-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.summary-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--stroke);
+  color: var(--dim);
+  white-space: nowrap;
+  letter-spacing: 0.1px;
+}
+.summary-pill.vendor-nvidia {
+  color: #76b900;
+  background: rgba(118, 185, 0, 0.08);
+  border-color: rgba(118, 185, 0, 0.22);
+}
+.summary-pill.vendor-amd {
+  color: #ed1c24;
+  background: rgba(237, 28, 36, 0.08);
+  border-color: rgba(237, 28, 36, 0.22);
+}
+.summary-pill.vendor-sl {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.22);
+}
+.summary-pill.vendor-opti {
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.08);
+  border-color: rgba(168, 85, 247, 0.22);
+}
+
+:root[data-theme="light"] .summary-pill.vendor-nvidia {
+  color: #3f6212;
+  background: rgba(101, 163, 13, 0.14);
+  border-color: rgba(101, 163, 13, 0.35);
+}
+:root[data-theme="light"] .summary-pill.vendor-amd {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+:root[data-theme="light"] .summary-pill.vendor-sl {
+  color: #0369a1;
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.3);
+}
+:root[data-theme="light"] .summary-pill.vendor-opti {
+  color: #7e22ce;
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.modules-body {
+  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.module-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.module-card:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.module-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.module-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vendor-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.vendor-badge.vendor-nvidia {
+  color: #76b900;
+  background: rgba(118, 185, 0, 0.12);
+  border: 1px solid rgba(118, 185, 0, 0.3);
+}
+.vendor-badge.vendor-amd {
+  color: #ed1c24;
+  background: rgba(237, 28, 36, 0.12);
+  border: 1px solid rgba(237, 28, 36, 0.3);
+}
+.vendor-badge.vendor-sl {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.vendor-badge.vendor-opti {
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.vendor-badge.vendor-generic {
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stroke);
+}
+.module-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.module-path {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--dim);
+  word-break: break-all;
+}
+.module-version-pill {
+  flex-shrink: 0;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--panel-1);
+  border: 1px solid var(--stroke);
+  color: var(--accent);
+}
+.module-version-pill.unknown {
+  color: var(--dim);
+  font-style: italic;
+}
+
 /* ---------------- sheet feature cards & options ---------------- */
 .install-options {
   display: grid;
@@ -1342,7 +1587,7 @@ button, input, select, textarea {
   overflow-wrap: anywhere;
 }
 .rcard .when { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; }
-.rcard .ago { font-size: 11.5px; color: rgba(255, 255, 255, .62); }
+.rcard .ago { font-size: 11.5px; color: rgba(255, 255, 255, .62); white-space: nowrap; }
 .rcard .pip { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, .32); flex: none; }
 .rcard .pip.on { background: var(--accent); box-shadow: 0 0 9px rgba(108, 193, 10, .8); }
 .hist-row .undone {
@@ -1723,6 +1968,36 @@ body { cursor: default; }
   background: var(--glass); color: var(--text); backdrop-filter: blur(24px);
   box-shadow: 0 8px 28px #0003; font-size: 13px;
 }
+.copy-feedback.toast-anim {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  z-index: 99999;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  animation: toast-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+:root[data-theme="light"] .copy-feedback.toast-anim {
+  background: #ea580c;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(234, 88, 12, 0.4);
+}
+@keyframes toast-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 @media (max-width: 900px) {
   .hist-row { flex-wrap: wrap; }
   .hist-row .n { flex-basis: 100%; }
@@ -1979,8 +2254,7 @@ body { cursor: default; }
   width: 180px;
 }
 .history-table .col-path {
-  font-family: Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;

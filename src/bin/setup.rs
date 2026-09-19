@@ -8,6 +8,68 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+#[path = "../core/i18n.rs"]
+mod i18n;
+
+fn detect_initial_language() -> String {
+    // 1. Check existing library.json in existing installation directory (if update/reinstall)
+    if let Some((ref install_dir, _, ref custom_storage)) = detect_existing_installation() {
+        if let Some(ref s) = custom_storage {
+            let p = Path::new(s).join("library.json");
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(lang) = val.get("lang").and_then(|l| l.as_str()) {
+                        if i18n::SUPPORTED_LANGS.iter().any(|l| l.code == lang) {
+                            return lang.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        let p = install_dir.join("library.json");
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(lang) = val.get("lang").and_then(|l| l.as_str()) {
+                    if i18n::SUPPORTED_LANGS.iter().any(|l| l.code == lang) {
+                        return lang.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Check existing library.json in %APPDATA%\dlss-5-studio\library.json
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("dlss-5-studio").join("library.json");
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(lang) = val.get("lang").and_then(|l| l.as_str()) {
+                    if i18n::SUPPORTED_LANGS.iter().any(|l| l.code == lang) {
+                        return lang.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check %PROGRAMDATA%\dlss-5-studio\library.json
+    if let Ok(progdata) = std::env::var("ProgramData") {
+        let p = PathBuf::from(progdata).join("dlss-5-studio").join("library.json");
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(lang) = val.get("lang").and_then(|l| l.as_str()) {
+                    if i18n::SUPPORTED_LANGS.iter().any(|l| l.code == lang) {
+                        return lang.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. First launch / clean setup: detect native Windows UI display language
+    i18n::detect_system_language()
+}
+
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/installer_payload.bin"));
@@ -138,7 +200,7 @@ fn main() {
     position: fixed;
     inset: 0;
     z-index: 0;
-    -webkit-app-region: drag;
+    cursor: default;
     background:
       radial-gradient(ellipse at 50% 30%, rgba(45, 25, 16, 0.75) 0%, rgba(14, 10, 8, 0.94) 80%),
       linear-gradient(135deg, #18110c 0%, #0d0907 100%);
@@ -159,10 +221,12 @@ fn main() {
     max-width: 90vw;
     max-height: 94vh;
     overflow-y: auto;
-    background: rgba(22, 16, 13, 0.92);
+    overscroll-behavior: contain;
+    -webkit-app-region: no-drag !important;
+    background: rgba(22, 16, 13, 0.94);
     border: 1px solid rgba(217, 119, 6, 0.65);
     border-radius: 18px;
-    padding: 28px 36px;
+    padding: 26px 34px;
     box-shadow:
       0 0 28px rgba(217, 119, 6, 0.38),
       0 0 50px rgba(217, 119, 6, 0.16),
@@ -170,12 +234,38 @@ fn main() {
       inset 0 0 1px rgba(251, 191, 36, 0.45);
     backdrop-filter: blur(28px);
     -webkit-backdrop-filter: blur(28px);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(217, 119, 6, 0.5) rgba(14, 10, 8, 0.35);
+  }
+  .setup-card::-webkit-scrollbar {
+    width: 7px;
+  }
+  .setup-card::-webkit-scrollbar-track {
+    background: rgba(14, 10, 8, 0.35);
+    border-radius: 8px;
+    margin: 8px 0;
+  }
+  .setup-card::-webkit-scrollbar-thumb {
+    background: rgba(217, 119, 6, 0.45);
+    border-radius: 8px;
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .setup-card::-webkit-scrollbar-thumb:hover {
+    background: rgba(245, 158, 11, 0.8);
+    border-color: rgba(251, 191, 36, 0.6);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  }
+  .setup-card::-webkit-scrollbar-corner {
+    background: transparent;
   }
   .drag-header {
-    -webkit-app-region: drag;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-bottom: 24px;
+    cursor: default;
+    user-select: none;
   }
   .no-drag {
     -webkit-app-region: no-drag;
@@ -201,11 +291,97 @@ fn main() {
     color: #f9fafb;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   }
-  .btn-close {
-    position: fixed;
-    top: 14px;
-    right: 14px;
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
     z-index: 100;
+  }
+  .lang-wrap {
+    position: relative;
+  }
+  .lang-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(30, 20, 16, 0.7);
+    border: 1px solid rgba(217, 119, 6, 0.35);
+    border-radius: 8px;
+    padding: 6px 11px;
+    color: #f3f4f6;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .lang-btn:hover {
+    border-color: #d97706;
+    background: rgba(217, 119, 6, 0.25);
+  }
+  .lang-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+  }
+  .lang-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 200;
+    width: 190px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 6px;
+    border-radius: 12px;
+    background: rgba(26, 18, 14, 0.96);
+    border: 1px solid rgba(217, 119, 6, 0.5);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 16px rgba(217, 119, 6, 0.2);
+    backdrop-filter: blur(20px);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(217, 119, 6, 0.5) rgba(14, 10, 8, 0.35);
+  }
+  .lang-menu::-webkit-scrollbar {
+    width: 6px;
+  }
+  .lang-menu::-webkit-scrollbar-thumb {
+    background: rgba(217, 119, 6, 0.4);
+    border-radius: 6px;
+  }
+  .lang-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #e5e7eb;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+  }
+  .lang-item:hover {
+    background: rgba(217, 119, 6, 0.2);
+  }
+  .lang-item.active {
+    background: rgba(217, 119, 6, 0.3);
+    color: #fbbf24;
+    font-weight: 600;
+  }
+  .lang-item .code {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #9ca3af;
+  }
+  .lang-item.active .code {
+    color: #fbbf24;
+  }
+  .btn-close-header {
     width: 32px;
     height: 32px;
     border-radius: 8px;
@@ -218,7 +394,7 @@ fn main() {
     border: 1px solid rgba(217, 119, 6, 0.25);
     transition: all 0.15s ease;
   }
-  .btn-close:hover {
+  .btn-close-header:hover {
     color: #fee2e2;
     background: rgba(239, 68, 68, 0.85);
     border-color: rgba(239, 68, 68, 1);
@@ -530,10 +706,14 @@ enum UninstallPhase {
 
 #[component]
 fn UninstallApp(target_dir: PathBuf) -> Element {
+    let initial_lang = use_hook(detect_initial_language);
+    let mut current_lang = use_signal(move || initial_lang);
+    let mut lang_menu_open = use_signal(|| false);
+
     let mut phase = use_signal(|| UninstallPhase::Confirm);
     let mut delete_appdata = use_signal(|| true);
     let mut progress = use_signal(|| 0);
-    let mut status_msg = use_signal(|| "Preparing uninstallation...".to_string());
+    let mut status_key = use_signal(|| "uninstall_status_preparing".to_string());
     let mut error_msg = use_signal(|| String::new());
 
     let icon_data_uri = format!(
@@ -544,25 +724,83 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
     let target_dir_str = target_dir.to_string_lossy().to_string();
 
     rsx! {
-        div { class: "app-bg-wrapper" }
-        button {
-            class: "btn-close no-drag",
-            title: "Close Uninstaller",
-            onclick: move |_| {
-                dioxus::desktop::window().close();
-            },
-            svg { style: "width: 16px; height: 16px; fill: currentColor;", view_box: "0 0 24 24",
-                path { d: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" }
-            }
+        div {
+            class: "app-bg-wrapper",
+            onmousedown: move |_| { dioxus::desktop::window().drag(); },
         }
-        div { class: "setup-card",
-            div { class: "drag-header",
+        div {
+            class: "setup-card",
+            onmousedown: move |e| { e.stop_propagation(); },
+            div {
+                class: "drag-header",
+                onmousedown: move |_| { dioxus::desktop::window().drag(); },
                 div { class: "title-group",
                     img { class: "app-badge", src: "{icon_data_uri}" }
                     span { class: "app-title", "DLSS 5 STUDIO" }
                     span {
                         style: "font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.45); border-radius: 6px; padding: 3px 8px; margin-left: 6px;",
-                        "UNINSTALL"
+                        "{i18n::t(&current_lang.read(), \"setup_tag_uninstall\")}"
+                    }
+                }
+                div { class: "header-actions no-drag",
+                    div {
+                        class: "lang-wrap",
+                        button {
+                            class: "lang-btn",
+                            title: "Language",
+                            onmousedown: move |e| { e.stop_propagation(); },
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                lang_menu_open.toggle();
+                            },
+                            svg { view_box: "0 0 24 24",
+                                circle { cx: "12", cy: "12", r: "10" }
+                                path { d: "M2 12h20" }
+                                path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }
+                            }
+                            span { "{current_lang.read().to_uppercase()}" }
+                            svg { style: "width: 10px; height: 10px;", view_box: "0 0 24 24",
+                                path { d: "M6 9l6 6 6-6" }
+                            }
+                        }
+                        if *lang_menu_open.read() {
+                            div {
+                                class: "lang-menu",
+                                onmousedown: move |e| { e.stop_propagation(); },
+                                onclick: move |e| { e.stop_propagation(); },
+                                for item in i18n::SUPPORTED_LANGS {
+                                    {
+                                        let code = item.code;
+                                        let is_active = *current_lang.read() == code;
+                                        rsx! {
+                                            button {
+                                                class: if is_active { "lang-item active" } else { "lang-item" },
+                                                onmousedown: move |e| { e.stop_propagation(); },
+                                                onclick: move |e| {
+                                                    e.stop_propagation();
+                                                    current_lang.set(code.to_string());
+                                                    lang_menu_open.set(false);
+                                                },
+                                                span { "{item.native}" }
+                                                span { class: "code", "{item.code.to_uppercase()}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    button {
+                        class: "btn-close-header",
+                        title: "{i18n::t(&current_lang.read(), \"setup_btn_close\")}",
+                        onmousedown: move |e| { e.stop_propagation(); },
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            dioxus::desktop::window().close();
+                        },
+                        svg { style: "width: 15px; height: 15px; fill: currentColor;", view_box: "0 0 24 24",
+                            path { d: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" }
+                        }
                     }
                 }
             }
@@ -575,15 +813,15 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                             span { style: "font-size: 22px; color: #ef4444; line-height: 1;", "⚠" }
                             div {
                                 div { style: "font-size: 14px; font-weight: 600; color: #fee2e2; margin-bottom: 4px;",
-                                    "Uninstall DLSS 5 Studio"
+                                    "{i18n::t(&current_lang.read(), \"uninstall_confirm_title\")}"
                                 }
                                 div { style: "font-size: 12px; color: #d1d5db; line-height: 1.45;",
-                                    "Are you sure you want to completely remove DLSS 5 Studio from your computer? All application executables, shortcuts, and background services will be removed."
+                                    "{i18n::t(&current_lang.read(), \"uninstall_confirm_desc\")}"
                                 }
                             }
                         }
 
-                        div { class: "section-label", "Installation Folder To Remove" }
+                        div { class: "section-label", "{i18n::t(&current_lang.read(), \"uninstall_target_label\")}" }
                         div { class: "path-row", style: "margin-bottom: 20px;",
                             input {
                                 class: "path-input no-drag",
@@ -593,7 +831,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                             }
                         }
 
-                        div { class: "section-label", "Cleanup Options" }
+                        div { class: "section-label", "{i18n::t(&current_lang.read(), \"uninstall_cleanup_opts\")}" }
                         div { class: "prefs-group no-drag", style: "margin-bottom: 28px;",
                             div {
                                 class: "pref-item",
@@ -602,8 +840,8 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                     span { class: "chk-icon", "✓" }
                                 }
                                 div {
-                                    div { style: "font-weight: 500;", "Also remove downloaded models, cache, and preferences" }
-                                    div { class: "helper-text", "Cleans %APPDATA%\\dlss-5-studio. Original game backups in your game folders remain untouched." }
+                                    div { style: "font-weight: 500;", "{i18n::t(&current_lang.read(), \"uninstall_clean_appdata\")}" }
+                                    div { class: "helper-text", "{i18n::t(&current_lang.read(), \"uninstall_clean_appdata_desc\")}" }
                                 }
                             }
                         }
@@ -614,7 +852,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                 onclick: move |_| {
                                     dioxus::desktop::window().close();
                                 },
-                                "Cancel"
+                                "{i18n::t(&current_lang.read(), \"uninstall_btn_cancel\")}"
                             }
                             button {
                                 class: "btn-danger",
@@ -625,15 +863,15 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
 
                                     spawn(async move {
                                         progress.set(20);
-                                        status_msg.set("Closing background processes...".to_string());
+                                        status_key.set("uninstall_status_closing".to_string());
                                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
                                         progress.set(50);
-                                        status_msg.set("Removing shortcuts and registry entries...".to_string());
+                                        status_key.set("uninstall_status_shortcuts".to_string());
                                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
                                         progress.set(75);
-                                        status_msg.set("Purging application files and directory...".to_string());
+                                        status_key.set("uninstall_status_purging".to_string());
 
                                         let result = tokio::task::spawn_blocking(move || {
                                             perform_native_uninstall_worker(&dir_clone, del_appdata)
@@ -642,7 +880,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                         match result {
                                             Ok(_) => {
                                                 progress.set(100);
-                                                status_msg.set("Uninstallation complete!".to_string());
+                                                status_key.set("uninstall_status_complete".to_string());
                                                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                                                 phase.set(UninstallPhase::Complete);
                                             }
@@ -653,7 +891,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                         }
                                     });
                                 },
-                                "Uninstall DLSS 5 Studio"
+                                "{i18n::t(&current_lang.read(), \"uninstall_btn_confirm\")}"
                             }
                         }
                     }
@@ -661,7 +899,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                 UninstallPhase::Uninstalling => rsx! {
                     div { style: "padding: 30px 0 10px;",
                         div { class: "status-text", style: "margin-bottom: 12px; font-weight: 600; font-size: 15px; color: #f3f4f6;",
-                            "Uninstalling DLSS 5 Studio..."
+                            "{i18n::t(&current_lang.read(), \"uninstall_status_preparing\")}"
                         }
                         div { class: "progress-wrap",
                             div { class: "progress-bar-bg",
@@ -670,7 +908,9 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                     style: "width: {progress()}%; background: linear-gradient(90deg, #dc2626, #f59e0b);"
                                 }
                             }
-                            div { class: "status-text", "{status_msg()}" }
+                            div { class: "status-text",
+                                "{i18n::t(&current_lang.read(), &status_key.read())}"
+                            }
                         }
                     }
                 },
@@ -681,10 +921,10 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                             "✓"
                         }
                         div { style: "font-size: 18px; font-weight: 700; color: #f9fafb; margin-bottom: 8px;",
-                            "Uninstallation Complete"
+                            "{i18n::t(&current_lang.read(), \"uninstall_complete_title\")}"
                         }
                         div { style: "font-size: 13px; color: #9ca3af; margin-bottom: 28px; line-height: 1.5; max-width: 440px; margin-left: auto; margin-right: auto;",
-                            "DLSS 5 Studio has been completely removed from your computer. Thank you for using DLSS 5 Studio."
+                            "{i18n::t(&current_lang.read(), \"uninstall_complete_desc\")}"
                         }
                         div { class: "actions-row no-drag", style: "justify-content: center;",
                             button {
@@ -692,7 +932,7 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                 onclick: move |_| {
                                     dioxus::desktop::window().close();
                                 },
-                                "Close"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_close\")}"
                             }
                         }
                     }
@@ -702,7 +942,9 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                         div { class: "warning-banner", style: "border-color: #ef4444; background: rgba(239, 68, 68, 0.1); margin-bottom: 20px;",
                             span { class: "warning-icon", style: "color: #ef4444;", "✕" }
                             div {
-                                div { style: "font-size: 13px; font-weight: 600; color: #fca5a5;", "Uninstallation Failed" }
+                                div { style: "font-size: 13px; font-weight: 600; color: #fca5a5;",
+                                    "{i18n::t(&current_lang.read(), \"uninstall_failed_title\")}"
+                                }
                                 div { style: "font-size: 12px; color: #fecaca; margin-top: 2px;", "{error_msg()}" }
                             }
                         }
@@ -712,12 +954,12 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
                                 onclick: move |_| {
                                     dioxus::desktop::window().close();
                                 },
-                                "Close"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_close\")}"
                             }
                             button {
                                 class: "btn-install",
                                 onclick: move |_| phase.set(UninstallPhase::Confirm),
-                                "Retry"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_retry\")}"
                             }
                         }
                     }
@@ -729,9 +971,13 @@ fn UninstallApp(target_dir: PathBuf) -> Element {
 
 #[component]
 fn SetupApp() -> Element {
+    let initial_lang = use_hook(detect_initial_language);
+    let mut current_lang = use_signal(move || initial_lang);
+    let mut lang_menu_open = use_signal(|| false);
+
     let mut phase = use_signal(|| SetupPhase::Config);
     let mut progress = use_signal(|| 0);
-    let mut status_msg = use_signal(|| "Preparing setup...".to_string());
+    let mut status_key = use_signal(|| "setup_status_preparing".to_string());
     let mut error_msg = use_signal(|| String::new());
 
     let default_path_fallback = r"C:\DLSS 5 Studio".to_string();
@@ -767,22 +1013,87 @@ fn SetupApp() -> Element {
     );
 
     rsx! {
-        div { class: "app-bg-wrapper" }
-        button {
-            class: "btn-close no-drag",
-            title: "Exit Setup",
-            onclick: move |_| {
-                dioxus::desktop::window().close();
-            },
-            svg { style: "width: 16px; height: 16px; fill: currentColor;", view_box: "0 0 24 24",
-                path { d: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" }
-            }
+        div {
+            class: "app-bg-wrapper",
+            onmousedown: move |_| { dioxus::desktop::window().drag(); },
+            onclick: move |_| { lang_menu_open.set(false); }
         }
-        div { class: "setup-card",
-            div { class: "drag-header",
+        div {
+            class: "setup-card",
+            onmousedown: move |e| { e.stop_propagation(); },
+            div {
+                class: "drag-header",
+                onmousedown: move |_| { dioxus::desktop::window().drag(); },
                 div { class: "title-group",
                     img { class: "app-badge", src: "{icon_data_uri}" }
                     span { class: "app-title", "DLSS 5 STUDIO" }
+                    if is_reinstall {
+                        span {
+                            style: "font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #f59e0b; background: rgba(217, 119, 6, 0.2); border: 1px solid rgba(217, 119, 6, 0.45); border-radius: 6px; padding: 3px 8px; margin-left: 6px;",
+                            "{i18n::t(&current_lang.read(), \"setup_tag_update\")}"
+                        }
+                    }
+                }
+                div { class: "header-actions no-drag",
+                    div {
+                        class: "lang-wrap",
+                        button {
+                            class: "lang-btn",
+                            title: "Language",
+                            onmousedown: move |e| { e.stop_propagation(); },
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                lang_menu_open.toggle();
+                            },
+                            svg { view_box: "0 0 24 24",
+                                circle { cx: "12", cy: "12", r: "10" }
+                                path { d: "M2 12h20" }
+                                path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }
+                            }
+                            span { "{current_lang.read().to_uppercase()}" }
+                            svg { style: "width: 10px; height: 10px;", view_box: "0 0 24 24",
+                                path { d: "M6 9l6 6 6-6" }
+                            }
+                        }
+                        if *lang_menu_open.read() {
+                            div {
+                                class: "lang-menu",
+                                onmousedown: move |e| { e.stop_propagation(); },
+                                onclick: move |e| { e.stop_propagation(); },
+                                for item in i18n::SUPPORTED_LANGS {
+                                    {
+                                        let code = item.code;
+                                        let is_active = *current_lang.read() == code;
+                                        rsx! {
+                                            button {
+                                                class: if is_active { "lang-item active" } else { "lang-item" },
+                                                onmousedown: move |e| { e.stop_propagation(); },
+                                                onclick: move |e| {
+                                                    e.stop_propagation();
+                                                    current_lang.set(code.to_string());
+                                                    lang_menu_open.set(false);
+                                                },
+                                                span { "{item.native}" }
+                                                span { class: "code", "{item.code.to_uppercase()}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    button {
+                        class: "btn-close-header",
+                        title: "{i18n::t(&current_lang.read(), \"setup_btn_close\")}",
+                        onmousedown: move |e| { e.stop_propagation(); },
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            dioxus::desktop::window().close();
+                        },
+                        svg { style: "width: 15px; height: 15px; fill: currentColor;", view_box: "0 0 24 24",
+                            path { d: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" }
+                        }
+                    }
                 }
             }
 
@@ -795,23 +1106,23 @@ fn SetupApp() -> Element {
                                 div {
                                     div { style: "font-size: 13px; font-weight: 600; color: #fbbf24;",
                                         if let Some(ref v) = existing_version {
-                                            "Existing Installation Detected: v{v} ➔ v{env!(\"CARGO_PKG_VERSION\")}"
+                                            "{i18n::t_params(&current_lang.read(), \"setup_existing_detected\", &[v, env!(\"CARGO_PKG_VERSION\")])}"
                                         } else {
-                                            "Existing Installation Detected ➔ v{env!(\"CARGO_PKG_VERSION\")}"
+                                            "{i18n::t_param(&current_lang.read(), \"setup_existing_detected_generic\", env!(\"CARGO_PKG_VERSION\"))}"
                                         }
                                     }
                                     div { style: "font-size: 11.5px; color: #9ca3af; margin-top: 3px;",
-                                        "Your games library, custom settings, and backups will be preserved."
+                                        "{i18n::t(&current_lang.read(), \"setup_existing_help\")}"
                                     }
                                 }
                                 span { style: "font-size: 10px; font-weight: 700; letter-spacing: 0.05em; color: #f59e0b; background: rgba(217, 119, 6, 0.2); border: 1px solid rgba(217, 119, 6, 0.45); border-radius: 6px; padding: 4px 8px; flex-shrink: 0;",
-                                    "UPDATE"
+                                    "{i18n::t(&current_lang.read(), \"setup_tag_update\")}"
                                 }
                             }
                         }
 
                         // Installation Location
-                        div { class: "section-label", "Installation Location" }
+                        div { class: "section-label", "{i18n::t(&current_lang.read(), \"setup_install_location\")}" }
                         div { class: "path-row", style: if is_protected_directory(Path::new(&install_path())) { "margin-bottom: 6px;" } else { "margin-bottom: 20px;" },
                             input {
                                 class: if is_protected_directory(Path::new(&install_path())) { "path-input path-input-warning no-drag" } else { "path-input no-drag" },
@@ -839,7 +1150,7 @@ fn SetupApp() -> Element {
                                         }
                                     });
                                 },
-                                "Browse..."
+                                "{i18n::t(&current_lang.read(), \"setup_browse\")}"
                             }
                         }
 
@@ -847,13 +1158,13 @@ fn SetupApp() -> Element {
                             div { class: "warning-banner", style: "margin-top: 0; margin-bottom: 20px;",
                                 span { class: "warning-icon", "⚠" }
                                 span { class: "warning-msg",
-                                    "Warning: This location is protected by Windows. DLSS Studio will require administrator privileges to install and write to this directory."
+                                    "{i18n::t(&current_lang.read(), \"setup_warn_protected_install\")}"
                                 }
                             }
                         }
 
                         // System Preferences
-                        div { class: "section-label", "System Preferences" }
+                        div { class: "section-label", "{i18n::t(&current_lang.read(), \"setup_system_prefs\")}" }
                         div { class: "prefs-group no-drag",
                             div {
                                 class: "pref-item",
@@ -861,7 +1172,7 @@ fn SetupApp() -> Element {
                                 div { class: if startup_on_boot() { "chk-box checked" } else { "chk-box" },
                                     span { class: "chk-icon", "✓" }
                                 }
-                                span { "Launch automatically when Windows starts" }
+                                span { "{i18n::t(&current_lang.read(), \"setup_pref_startup\")}" }
                             }
                             div {
                                 class: "pref-item",
@@ -869,7 +1180,7 @@ fn SetupApp() -> Element {
                                 div { class: if run_in_background() { "chk-box checked" } else { "chk-box" },
                                     span { class: "chk-icon", "✓" }
                                 }
-                                span { "Keep running in the background when closed" }
+                                span { "{i18n::t(&current_lang.read(), \"setup_pref_background\")}" }
                             }
                             div {
                                 class: "pref-item",
@@ -877,7 +1188,7 @@ fn SetupApp() -> Element {
                                 div { class: if create_desktop_shortcut() { "chk-box checked" } else { "chk-box" },
                                     span { class: "chk-icon", "✓" }
                                 }
-                                span { "Create desktop shortcut" }
+                                span { "{i18n::t(&current_lang.read(), \"setup_pref_desktop\")}" }
                             }
                         }
 
@@ -889,12 +1200,12 @@ fn SetupApp() -> Element {
                                 class: if show_advanced() { "advanced-chevron open" } else { "advanced-chevron" },
                                 "▸"
                             }
-                            span { class: "advanced-toggle-label", "Advanced Options" }
+                            span { class: "advanced-toggle-label", "{i18n::t(&current_lang.read(), \"setup_advanced_options\")}" }
                         }
 
                         if show_advanced() {
                             div { class: "advanced-panel no-drag",
-                                div { class: "section-label", "Data & Backups Storage Location" }
+                                div { class: "section-label", "{i18n::t(&current_lang.read(), \"setup_storage_location\")}" }
                                 div { class: "path-row", style: "margin-bottom: 6px;",
                                     input {
                                         class: if is_protected_directory(Path::new(&storage_path())) { "path-input path-input-warning no-drag" } else { "path-input no-drag" },
@@ -913,16 +1224,16 @@ fn SetupApp() -> Element {
                                                 }
                                             });
                                         },
-                                        "Browse..."
+                                        "{i18n::t(&current_lang.read(), \"setup_browse\")}"
                                     }
                                 }
-                                div { class: "helper-text", "Stores downloaded DLSS/MFG models, shaders, and original game backups" }
+                                div { class: "helper-text", "{i18n::t(&current_lang.read(), \"setup_storage_help\")}" }
 
                                 if is_protected_directory(Path::new(&storage_path())) {
                                     div { class: "warning-banner",
                                         span { class: "warning-icon", "⚠" }
                                         span { class: "warning-msg",
-                                            "Warning: This location is protected by Windows. DLSS Studio will require administrator privileges to save models and game backups here."
+                                            "{i18n::t(&current_lang.read(), \"setup_warn_protected_storage\")}"
                                         }
                                     }
                                 }
@@ -940,25 +1251,27 @@ fn SetupApp() -> Element {
                                     let s_boot = startup_on_boot();
                                     let b_run = run_in_background();
                                     let d_shortcut = create_desktop_shortcut();
+                                    let chosen_lang = current_lang.read().clone();
 
                                     spawn(async move {
                                         progress.set(15);
-                                        status_msg.set("Preparing target installation directory...".to_string());
+                                        status_key.set("setup_status_target".to_string());
                                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
                                         progress.set(45);
-                                        status_msg.set("Extracting DLSS 5 Studio application...".to_string());
+                                        status_key.set("setup_status_extracting".to_string());
 
                                         let target_folder_clone = target_folder.clone();
                                         let target_storage_clone = target_storage.clone();
+                                        let lang_clone = chosen_lang.clone();
                                         let result = tokio::task::spawn_blocking(move || {
-                                            run_installation_pipeline(target_folder_clone, target_storage_clone, s_boot, b_run, d_shortcut)
+                                            run_installation_pipeline(target_folder_clone, target_storage_clone, s_boot, b_run, d_shortcut, lang_clone)
                                         }).await.unwrap_or(Err("Installation task panicked".to_string()));
 
                                         match result {
                                             Ok(_) => {
                                                 progress.set(100);
-                                                status_msg.set("Installation complete!".to_string());
+                                                status_key.set("setup_status_complete".to_string());
                                                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                                                 phase.set(SetupPhase::Complete);
                                             }
@@ -969,12 +1282,16 @@ fn SetupApp() -> Element {
                                         }
                                     });
                                 },
-                                if is_reinstall { "Update" } else { "Install Now" }
+                                if is_reinstall {
+                                    "{i18n::t(&current_lang.read(), \"setup_btn_update\")}"
+                                } else {
+                                    "{i18n::t(&current_lang.read(), \"setup_btn_install_now\")}"
+                                }
                             }
                             button {
                                 class: "btn-cancel",
                                 onclick: move |_| { dioxus::desktop::window().close(); },
-                                "Cancel"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_cancel\")}"
                             }
                         }
                     }
@@ -984,14 +1301,18 @@ fn SetupApp() -> Element {
                         div { class: "progress-bar-bg",
                             div { class: "progress-bar-fill", style: "width: {progress()}%;" }
                         }
-                        div { class: "status-text", "{status_msg()}" }
+                        div { class: "status-text", "{i18n::t(&current_lang.read(), &status_key.read())}" }
                     }
                 },
                 SetupPhase::Complete => rsx! {
                     div { style: "padding: 10px 0; text-align: center;",
                         div { style: "color: #10b981; font-size: 40px; margin-bottom: 12px;", "✓" }
-                        h2 { style: "font-size: 20px; font-weight: 700; color: #f9fafb; margin-bottom: 8px;", "Setup Completed Successfully" }
-                        p { style: "font-size: 13px; color: #9ca3af; margin-bottom: 24px;", "DLSS 5 Studio has been successfully installed and configured." }
+                        h2 { style: "font-size: 20px; font-weight: 700; color: #f9fafb; margin-bottom: 8px;",
+                            "{i18n::t(&current_lang.read(), \"setup_complete_title\")}"
+                        }
+                        p { style: "font-size: 13px; color: #9ca3af; margin-bottom: 24px;",
+                            "{i18n::t(&current_lang.read(), \"setup_complete_desc\")}"
+                        }
                         div { class: "actions-row no-drag", style: "justify-content: center;",
                             button {
                                 class: "btn-install",
@@ -1005,12 +1326,12 @@ fn SetupApp() -> Element {
                                         dioxus::desktop::window().close();
                                     }
                                 },
-                                "Launch DLSS 5 Studio"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_launch\")}"
                             }
                             button {
                                 class: "btn-cancel",
                                 onclick: move |_| { dioxus::desktop::window().close(); },
-                                "Finish"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_finish\")}"
                             }
                         }
                     }
@@ -1018,18 +1339,20 @@ fn SetupApp() -> Element {
                 SetupPhase::Error => rsx! {
                     div { style: "padding: 20px 10px; text-align: center;",
                         div { style: "color: #ef4444; font-size: 32px; margin-bottom: 12px;", "⚠" }
-                        h2 { style: "font-size: 19px; font-weight: 700; color: #f3f4f6; margin-bottom: 8px;", "Installation Failed" }
+                        h2 { style: "font-size: 19px; font-weight: 700; color: #f3f4f6; margin-bottom: 8px;",
+                            "{i18n::t(&current_lang.read(), \"setup_failed_title\")}"
+                        }
                         p { style: "font-size: 13px; color: #ef4444; margin-bottom: 24px; word-break: break-word;", "{error_msg()}" }
                         div { class: "actions-row no-drag", style: "justify-content: center;",
                             button {
                                 class: "btn-browse",
                                 onclick: move |_| { phase.set(SetupPhase::Config); },
-                                "Back to Options"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_back\")}"
                             }
                             button {
                                 class: "btn-cancel",
                                 onclick: move |_| { dioxus::desktop::window().close(); },
-                                "Close"
+                                "{i18n::t(&current_lang.read(), \"setup_btn_close\")}"
                             }
                         }
                     }
@@ -1226,6 +1549,7 @@ fn run_installation_pipeline(
     startup: bool,
     background: bool,
     desktop_shortcut: bool,
+    selected_lang: String,
 ) -> Result<(), String> {
     let dest = PathBuf::from(&target_folder);
     std::fs::create_dir_all(&dest)
@@ -1290,6 +1614,26 @@ fn run_installation_pipeline(
         dest.join("storage.json"),
         serde_json::to_string_pretty(&storage_cfg).unwrap_or_default(),
     );
+
+    // Persist selected language into library.json so DLSS Studio immediately launches in this language
+    let lang_code = selected_lang.clone();
+    let update_library_lang = |lib_path: &Path| {
+        let mut data: serde_json::Value = if let Ok(c) = std::fs::read_to_string(lib_path) {
+            serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if let Some(obj) = data.as_object_mut() {
+            obj.insert("lang".to_string(), serde_json::Value::String(lang_code.clone()));
+        }
+        let _ = std::fs::write(lib_path, serde_json::to_string_pretty(&data).unwrap_or_default());
+    };
+    update_library_lang(&storage_dest.join("library.json"));
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let default_appdata_dir = PathBuf::from(appdata).join("dlss-5-studio");
+        let _ = std::fs::create_dir_all(&default_appdata_dir);
+        update_library_lang(&default_appdata_dir.join("library.json"));
+    }
 
     // Copy setup.exe as uninstall.exe in target folder (prevent copying onto itself)
     if let Ok(curr) = std::env::current_exe() {

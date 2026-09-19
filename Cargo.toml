@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "dlss5-swapper-rust"
-version = "1.0.6"
+version = "1.0.7"
 edition = "2021"
 default-run = "dlss-studio"
 description = "DLSS 5 Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"

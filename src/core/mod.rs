@@ -7,7 +7,6 @@ pub mod mfg_unlock;
 pub mod state;
 pub mod install_guards;
 pub mod compatibility;
-pub mod emulators;
 pub mod steamart;
 pub mod install_routes;
 
@@ -28,7 +27,7 @@ mod tests {
 
     #[test]
     fn test_app_version_matches_package() {
-        assert_eq!(APP_VERSION, "1.0.6");
+        assert_eq!(APP_VERSION, "1.0.7");
         assert!(!APP_VERSION.is_empty());
     }
 }

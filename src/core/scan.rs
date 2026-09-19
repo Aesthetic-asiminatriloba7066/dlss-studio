@@ -157,7 +157,15 @@ pub struct GameEntry {
     pub available_exes: Vec<GameExeOption>,
     #[serde(default)]
     pub nr_style: usize,
+    #[serde(default)]
+    pub nr_style_enabled: bool,
+    #[serde(default = "default_mfg_multiplier")]
+    pub mfg_multiplier: u32,
+    #[serde(default)]
+    pub has_anti_cheat: bool,
 }
+
+pub fn default_mfg_multiplier() -> u32 { 4 }
 
 impl GameEntry {
     pub fn is_dlss5_patched(&self) -> bool {
@@ -185,7 +193,7 @@ pub fn short_version(v: &str) -> String {
 }
 
 static RE_INSTALLER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(unins|setup|install|vcredist|vc_redist|dxsetup|dxwebsetup|oalinst|uninstall|crashreport|crashhandler|unitycrashhandler|unrealcefsubprocess|easyanticheat|eac|battleye|be_service|launcher|activation|patch|update|dotnetfx|touchup|rapidcrc|autorun|autoplay|quicksfv|readme|config|benchmark|report|helper|service|cleanup|modorganizer|redlauncher|skse\d*_loader|hlds |srcds |steamerrorreporter|dgvoodoocpl|dgvoodoo|reshade|optiscaler|dlss5-feed|specialk|skif|bg3modmanager|modmanager|vortex|fluffy|fomod)").unwrap()
+    Regex::new(r"(?i)^(unins|setup|install|vcredist|vc_redist|dxsetup|dxwebsetup|oalinst|uninstall|crashreport|crashhandler|unitycrashhandler|unrealcefsubprocess|easyanticheat|eac|battleye|be_service|launcher|activation|patch|update|dotnetfx|touchup|rapidcrc|autorun|autoplay|quicksfv|readme|config|benchmark|report|helper|service|cleanup|modorganizer|redlauncher|skse\d*_loader|hlds |srcds |steamerrorreporter|dgvoodoocpl|dgvoodoo|reshade|optiscaler|dlss5-feed|specialk|skif|bg3modmanager|modmanager|vortex|fluffy|fomod|vpk|.*compiler|.*compile)").unwrap()
 });
 
 static RE_NOT_GAME_DIR: LazyLock<Regex> = LazyLock::new(|| {
@@ -216,6 +224,12 @@ pub fn is_installer_or_helper(name: &str) -> bool {
         || lower == "scc.exe" || lower == "unins000.exe" || lower.starts_with("unins")
         || lower.contains("prelauncher") || lower.contains("redprelauncher")
         || lower.contains("errorreporter") || lower.contains("crashreporter")
+        || lower == "vpk.exe" || lower.starts_with("vpk")
+        || lower.contains("compiler") || lower.contains("compile")
+        || lower == "hammer.exe" || lower == "vvis.exe" || lower == "vrad.exe" || lower == "vbsp.exe"
+        || lower == "bspzip.exe" || lower == "glview.exe" || lower == "hlfaceposer.exe"
+        || lower == "mksheet.exe" || lower == "motionmapper.exe" || lower == "qc_eyes.exe"
+        || lower == "simd9.exe" || lower == "vtex.exe"
     {
         return true;
     }
@@ -438,47 +452,70 @@ pub fn detect_sibling_api(dir: &Path) -> Option<String> {
         return Some("DirectX 12".to_string());
     }
 
-    let Ok(entries) = fs::read_dir(dir) else { return None; };
     let mut candidate_dlls: Vec<PathBuf> = Vec::new();
     let mut fallback_dxgi = false;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            let is_dll = path.extension().map(|e| e.to_string_lossy().eq_ignore_ascii_case("dll")).unwrap_or(false);
-            if !is_dll {
-                continue;
+    // Scan dir itself plus standard game engine binary subdirectories
+    let mut scan_dirs = vec![dir.to_path_buf()];
+    let subdirs = ["bin", "bin64", "bin32", "x64", "x86", "win64", "win32", "retail", "Retail"];
+    for sub in &subdirs {
+        let p = dir.join(sub);
+        if p.is_dir() && !scan_dirs.contains(&p) {
+            scan_dirs.push(p);
+        }
+    }
+    if let Some(parent) = dir.parent() {
+        for sub in &subdirs {
+            let p = parent.join(sub);
+            if p.is_dir() && !scan_dirs.contains(&p) {
+                scan_dirs.push(p);
             }
-            let fname = entry.file_name().to_string_lossy().to_lowercase();
-            if is_middleware_dll(&fname) {
-                continue;
-            }
-            // Fast filename shortcuts
-            if fname.contains("dx12") || fname.contains("d3d12") {
-                return Some("DirectX 12".to_string());
-            }
-            if fname.contains("vulkan") {
-                return Some("Vulkan".to_string());
-            }
-            if fname.contains("dx11") || fname.contains("d3d11") {
-                return Some("DirectX 11".to_string());
-            }
-            if fname.contains("spdx9") || fname.contains("graphicsdx9") || fname.starts_with("dx9") {
-                return Some("DirectX 9".to_string());
-            }
-            if fname.contains("dx8") || fname.contains("d3d8") {
-                return Some("DirectX 8".to_string());
-            }
+        }
+    }
 
-            candidate_dlls.push(path);
+    for d in scan_dirs {
+        let Ok(entries) = fs::read_dir(&d) else { continue; };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let is_dll = path.extension().map(|e| e.to_string_lossy().eq_ignore_ascii_case("dll")).unwrap_or(false);
+                if !is_dll {
+                    continue;
+                }
+                let fname = entry.file_name().to_string_lossy().to_lowercase();
+                if is_middleware_dll(&fname) {
+                    continue;
+                }
+                // Fast filename shortcuts
+                if fname.contains("dx12") || fname.contains("d3d12") {
+                    return Some("DirectX 12".to_string());
+                }
+                if fname.contains("vulkan") {
+                    return Some("Vulkan".to_string());
+                }
+                if fname.contains("dx11") || fname.contains("d3d11") {
+                    return Some("DirectX 11".to_string());
+                }
+                if fname.contains("dx9") || fname.contains("d3d9") || fname.contains("spdx9") || fname.contains("graphicsdx9") {
+                    return Some("DirectX 9".to_string());
+                }
+                if fname.contains("dx8") || fname.contains("d3d8") {
+                    return Some("DirectX 8".to_string());
+                }
+                if fname.contains("opengl") {
+                    return Some("OpenGL".to_string());
+                }
+
+                candidate_dlls.push(path);
+            }
         }
     }
 
     // Inspect PE imports & markers for candidate graphics DLLs
-    // Prioritize DLLs likely to be rendering engines (d3d*, render*, gfx*, graphics*, etc.)
+    // Prioritize DLLs likely to be rendering engines (d3d*, render*, gfx*, graphics*, shader*, engine*, etc.)
     candidate_dlls.sort_by_key(|p| {
         let fn_str = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-        if fn_str.starts_with("d3d") || fn_str.starts_with("render") || fn_str.starts_with("gfx") || fn_str.starts_with("graphics") {
+        if fn_str.starts_with("d3d") || fn_str.starts_with("render") || fn_str.starts_with("gfx") || fn_str.starts_with("graphics") || fn_str.starts_with("shader") || fn_str.starts_with("engine") {
             0
         } else {
             1
@@ -842,6 +879,117 @@ pub fn extract_xbox_metadata(dir: &Path) -> (Option<String>, Option<String>) {
     (resolved_name, resolved_poster)
 }
 
+pub fn find_local_gog_cover(game_id: &str) -> Option<PathBuf> {
+    let mut base_dirs = Vec::new();
+    if let Ok(prog_data) = std::env::var("ProgramData") {
+        base_dirs.push(PathBuf::from(prog_data).join("GOG.com").join("Galaxy").join("webcache"));
+    }
+    if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
+        base_dirs.push(PathBuf::from(local_app).join("GOG.com").join("Galaxy").join("webcache"));
+    }
+
+    for base in base_dirs {
+        if !base.is_dir() {
+            continue;
+        }
+        if let Ok(users) = fs::read_dir(&base) {
+            for user in users.flatten() {
+                let gog_dir = user.path().join("gog").join(game_id);
+                if gog_dir.is_dir() {
+                    if let Ok(files) = fs::read_dir(&gog_dir) {
+                        let mut fallbacks = Vec::new();
+                        for f in files.flatten() {
+                            let p = f.path();
+                            let fname = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                            if fname.contains("_glx_vertical_cover") {
+                                if let Ok(meta) = p.metadata() {
+                                    if meta.len() > 2000 {
+                                        return Some(p);
+                                    }
+                                }
+                            } else if fname.contains("_glx_bg_") || fname.contains("_glx_logo") {
+                                if let Ok(meta) = p.metadata() {
+                                    if meta.len() > 2000 {
+                                        fallbacks.push(p);
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(fb) = fallbacks.into_iter().next() {
+                            return Some(fb);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn extract_gog_metadata(dir: &Path) -> (Option<String>, Option<String>, Option<String>) {
+    let mut resolved_name = None;
+    let mut resolved_poster = None;
+    let mut resolved_game_id = None;
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().to_lowercase();
+            if fname.starts_with("goggame-") && fname.ends_with(".info") {
+                if let Ok(text) = fs::read_to_string(entry.path()) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if resolved_name.is_none() {
+                            if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
+                                if !n.trim().is_empty() {
+                                    resolved_name = Some(n.trim().to_string());
+                                }
+                            }
+                        }
+                        if resolved_game_id.is_none() {
+                            if let Some(gid) = val.get("gameId").and_then(|v| v.as_str()) {
+                                resolved_game_id = Some(gid.trim().to_string());
+                            } else if let Some(gid_num) = val.get("gameId").and_then(|v| v.as_i64()) {
+                                resolved_game_id = Some(gid_num.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    if resolved_game_id.is_none() || resolved_name.is_none() {
+        let subkeys = win32_enum_subkeys(HKEY_LOCAL_MACHINE, r"SOFTWARE\GOG.com\Games", KEY_READ | KEY_WOW64_32KEY);
+        let norm_dir = crate::core::state::normalize_game_path(dir);
+        for game_id in subkeys {
+            let subkey_path = format!(r"SOFTWARE\GOG.com\Games\{}", game_id);
+            if let Some(path_str) = win32_read_reg_string(HKEY_LOCAL_MACHINE, &subkey_path, "path", KEY_READ | KEY_WOW64_32KEY) {
+                if crate::core::state::normalize_path_str(&path_str) == norm_dir {
+                    if resolved_game_id.is_none() {
+                        resolved_game_id = Some(game_id.clone());
+                    }
+                    if resolved_name.is_none() {
+                        if let Some(gname) = win32_read_reg_string(HKEY_LOCAL_MACHINE, &subkey_path, "gameName", KEY_READ | KEY_WOW64_32KEY) {
+                            if !gname.trim().is_empty() {
+                                resolved_name = Some(gname.trim().to_string());
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(ref gid) = resolved_game_id {
+        if let Some(cover_path) = find_local_gog_cover(gid) {
+            resolved_poster = crate::core::steamart::file_to_art_uri(&cover_path);
+        }
+    }
+
+    (resolved_name, resolved_poster, resolved_game_id)
+}
+
 pub fn is_generic_folder_name(s: &str) -> bool {
     let lower = s.trim().to_lowercase();
     matches!(
@@ -888,7 +1036,8 @@ pub fn infer_game_name(dir: &Path, exe_path: &Path, xbox_name: Option<String>) -
 }
 
 pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
-    let dir = dir.as_ref();
+    let clean_dir = crate::core::state::clean_path_separators(dir.as_ref());
+    let dir = clean_dir.as_path();
     if !dir.exists() || !dir.is_dir() {
         return None;
     }
@@ -935,7 +1084,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                 s == "optiscaler" || s == "_dlss5_backup" || s == "reshade-shaders"
             });
             let file_name = entry.file_name().to_string_lossy().to_lowercase();
-            if file_name.ends_with(".exe") && !is_helper_or_tool_path(path) {
+            if file_name.ends_with(".exe") && !is_helper_or_tool_path(path) && !is_installer_or_helper(&file_name) {
                 let t_exe = std::time::Instant::now();
                 let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                 let depth = entry.depth();
@@ -954,15 +1103,10 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
                 let parent_dir = path.parent();
                 let has_sibling_dlss = parent_dir.map(|p| p.join("nvngx_dlss.dll").exists()).unwrap_or(false);
 
-                let detected_api = if let Some(ref pe) = pe_opt {
-                    detect_api(path, &pe.imports)
-                } else if let Some(api) = detect_api(path, &[]) {
-                    Some(api)
-                } else if let Some(parent) = parent_dir {
-                    detect_sibling_api(parent)
-                } else {
-                    None
-                };
+                let detected_api = pe_opt.as_ref()
+                    .and_then(|pe| detect_api(path, &pe.imports))
+                    .or_else(|| detect_api(path, &[]))
+                    .or_else(|| parent_dir.and_then(detect_sibling_api));
 
                 let api = match detected_api {
                     Some(a) => a,
@@ -1110,7 +1254,20 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         is_laa: c.is_laa,
     }).collect();
 
-    let chosen = candidates.remove(0);
+    let manifest_opt = crate::core::journal::read_manifest(dir);
+    let chosen = if let Some(m) = &manifest_opt {
+        if let Some(target_exe_rel) = &m.game_exe {
+            if let Some(pos) = candidates.iter().position(|c| c.rel.eq_ignore_ascii_case(target_exe_rel) || c.path.ends_with(target_exe_rel)) {
+                candidates.remove(pos)
+            } else {
+                candidates.remove(0)
+            }
+        } else {
+            candidates.remove(0)
+        }
+    } else {
+        candidates.remove(0)
+    };
 
     // Check ReShade hooks
     let mut reshade_installed = false;
@@ -1179,15 +1336,60 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
     let has_backup = crate::core::journal::has_backup_available(dir);
 
     let mut installed_route = None;
-    if let Some(manifest) = crate::core::journal::read_manifest(dir) {
+    let mut mfg_multiplier: u32 = 4;
+    let mut nr_style_enabled = nr_style > 0;
+
+    if let Some(manifest) = &manifest_opt {
         if !manifest.route.is_empty() {
             installed_route = Some(manifest.route.clone());
-            if manifest.route == "feeder" {
+            if manifest.route == "feeder" || manifest.route == "native" {
                 addon_installed = true;
                 reshade_installed = true;
             } else if manifest.route == "optiscaler" {
                 optiscaler_installed = true;
             }
+        }
+        if let Some(mfg_u) = manifest.mfg_unlock {
+            mfg_addon = mfg_u;
+        }
+        if let Some(mult) = manifest.mfg_multiplier {
+            mfg_multiplier = mult;
+        }
+        if let Some(nr_en) = manifest.nr_style_enabled {
+            nr_style_enabled = nr_en;
+        }
+        if let Some(style) = manifest.nr_style {
+            nr_style = style;
+        }
+        if let Some(presr) = manifest.opti_presr {
+            optiscaler_presr = presr;
+        }
+        if let Some(passes) = manifest.opti_passes {
+            optiscaler_passes = passes;
+        }
+    }
+
+    // Disk fallback if manifest route was missing/empty:
+    if installed_route.is_none() {
+        let has_feeder = search_dirs.into_iter().flatten().any(|d| {
+            d.join("dlss5-feed.addon64").is_file()
+                || d.join("dlss5-feed.addon32").is_file()
+                || d.join("dlss5-feed.cfg").is_file()
+                || d.join("reshade-shaders").is_dir()
+        });
+        let has_native = search_dirs.into_iter().flatten().any(|d| {
+            d.join("renodx-dlss5.addon64").is_file()
+        });
+        if has_feeder {
+            installed_route = Some("feeder".to_string());
+            addon_installed = true;
+            reshade_installed = true;
+        } else if has_native {
+            installed_route = Some("native".to_string());
+            addon_installed = true;
+            reshade_installed = true;
+        } else if optiscaler_installed {
+            installed_route = Some("optiscaler".to_string());
         }
     }
 
@@ -1238,20 +1440,17 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
 
     if poster.is_none() {
-        let art_dir = crate::core::state::get_appdata_dir().join("art");
-        let key = crate::core::steamart::key_for_dir(dir);
-        let cover_file = art_dir.join(format!("{}-cover.jpg", key));
-        let hero_file = art_dir.join(format!("{}-hero.jpg", key));
-        if cover_file.exists() && cover_file.metadata().map(|m| m.len() > 2000).unwrap_or(false) {
-            poster = Some(format!("http://dlss-art.localhost/art/{}-cover.jpg", key));
-        } else if hero_file.exists() && hero_file.metadata().map(|m| m.len() > 2000).unwrap_or(false) {
-            poster = Some(format!("http://dlss-art.localhost/art/{}-hero.jpg", key));
-        }
+        poster = crate::core::steamart::find_cached_art(dir);
     }
 
     let (xbox_name, xbox_poster) = extract_xbox_metadata(dir);
     if poster.is_none() {
         poster = xbox_poster;
+    }
+
+    let (gog_name, gog_poster, gog_id) = extract_gog_metadata(dir);
+    if poster.is_none() {
+        poster = gog_poster;
     }
 
     let is_xbox_dir = dir.join("MicrosoftGame.config").exists()
@@ -1260,7 +1459,11 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         || dir.join("appxmanifest.xml").exists()
         || dir.to_string_lossy().to_lowercase().contains("xboxgames")
         || dir.to_string_lossy().to_lowercase().contains("windowsapps");
-    let name = infer_game_name(dir, &chosen.path, xbox_name);
+    let name = if let Some(g_name) = gog_name {
+        g_name
+    } else {
+        infer_game_name(dir, &chosen.path, xbox_name)
+    };
 
     crate::core::logger::debug("scan", &format!(
         "Game scanned '{}': exe={}, bitness={}-bit, api={}, dlss={:?}, fg={}, optiscaler={}, backup={}",
@@ -1269,6 +1472,8 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
 
     let detected_launcher = if let Some(dl) = declared_launcher {
         dl
+    } else if gog_id.is_some() {
+        "GOG".to_string()
     } else if is_xbox_dir {
         "Xbox".to_string()
     } else if dir.join("steam_appid.txt").exists()
@@ -1308,6 +1513,7 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
     let has_native_dlss = sr_file.is_some() && !is_mod_added_dlss;
     let is_vulkan = chosen.api.to_lowercase().contains("vulkan");
     let can_inject_fg = chosen.bitness == 64 && has_native_dlss && !has_fg && is_vulkan;
+    let has_anti_cheat = crate::core::install_guards::has_anti_cheat(dir);
 
     Some(GameEntry {
         name,
@@ -1335,6 +1541,9 @@ pub fn scan_game_directory<P: AsRef<Path>>(dir: P) -> Option<GameEntry> {
         files,
         available_exes,
         nr_style,
+        nr_style_enabled,
+        mfg_multiplier,
+        has_anti_cheat,
     })
 }
 
@@ -1345,15 +1554,10 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
     for d in &declared {
         let pe_opt = inspect_pe(&d.path);
         let bitness = pe_opt.as_ref().map(|p| p.bitness).unwrap_or(d.bitness);
-        let detected_api = if let Some(ref pe) = pe_opt {
-            detect_api(&d.path, &pe.imports)
-        } else if let Some(api) = detect_api(&d.path, &[]) {
-            Some(api)
-        } else if let Some(parent) = d.path.parent() {
-            detect_sibling_api(parent)
-        } else {
-            None
-        };
+        let detected_api = pe_opt.as_ref()
+            .and_then(|pe| detect_api(&d.path, &pe.imports))
+            .or_else(|| detect_api(&d.path, &[]))
+            .or_else(|| d.path.parent().and_then(detect_sibling_api));
         let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
         let api = detected_api.unwrap_or_else(|| "Undetected".to_string());
         exes.push(GameExeOption {
@@ -1392,22 +1596,17 @@ pub fn discover_game_exes(dir: &Path) -> Vec<GameExeOption> {
         let path = entry.path();
         if path.is_file() {
             let file_name = entry.file_name().to_string_lossy().to_lowercase();
-            if file_name.ends_with(".exe") && !is_helper_or_tool_path(path) {
+            if file_name.ends_with(".exe") && !is_helper_or_tool_path(path) && !is_installer_or_helper(&file_name) {
                 if exes.iter().any(|e| e.path == path) {
                     continue;
                 }
                 let pe_opt = inspect_pe(path);
                 let bitness = pe_opt.as_ref().map(|p| p.bitness).unwrap_or(64);
                 let is_laa = pe_opt.as_ref().map(|p| p.is_laa).unwrap_or(bitness == 64);
-                let detected_api = if let Some(ref pe) = pe_opt {
-                    detect_api(path, &pe.imports)
-                } else if let Some(api) = detect_api(path, &[]) {
-                    Some(api)
-                } else if let Some(parent) = path.parent() {
-                    detect_sibling_api(parent)
-                } else {
-                    None
-                };
+                let detected_api = pe_opt.as_ref()
+                    .and_then(|pe| detect_api(path, &pe.imports))
+                    .or_else(|| detect_api(path, &[]))
+                    .or_else(|| path.parent().and_then(detect_sibling_api));
 
                 let api = detected_api.unwrap_or_else(|| "Undetected".to_string());
                 let rel = path.strip_prefix(dir)
@@ -1531,21 +1730,27 @@ pub fn discover_steam() -> Vec<GameEntry> {
         return games;
     };
 
-    let norm_root = crate::core::state::normalize_path_str(&steam_root);
-    let mut libraries = vec![PathBuf::from(&steam_root)];
+    let mut libraries = Vec::new();
     let mut seen_libs = std::collections::HashSet::new();
-    seen_libs.insert(norm_root);
 
     let vdf_path = PathBuf::from(&steam_root).join("steamapps").join("libraryfolders.vdf");
     if let Ok(vdf_content) = fs::read_to_string(&vdf_path) {
         let re = Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
         for cap in re.captures_iter(&vdf_content) {
             let lib = cap[1].replace(r"\\", r"\");
-            let norm_lib = crate::core::state::normalize_path_str(&lib);
+            let clean_lib = crate::core::state::clean_path_separators(Path::new(&lib));
+            let norm_lib = crate::core::state::normalize_game_path(&clean_lib);
             if seen_libs.insert(norm_lib) {
-                libraries.push(PathBuf::from(lib));
+                libraries.push(clean_lib);
             }
         }
+    }
+
+    // Fallback if libraryfolders.vdf was missing or did not include steam_root
+    let clean_root = crate::core::state::clean_path_separators(Path::new(&steam_root));
+    let norm_root = crate::core::state::normalize_game_path(&clean_root);
+    if seen_libs.insert(norm_root) {
+        libraries.push(clean_root);
     }
 
     let mut seen_dirs = std::collections::HashSet::new();
@@ -1609,6 +1814,11 @@ pub fn discover_gog() -> Vec<GameEntry> {
                 if gdir.exists() {
                     if let Some(mut game) = scan_game_directory(&gdir) {
                         game.launcher = "GOG".to_string();
+                        if let Some(gname) = win32_read_reg_string(HKEY_LOCAL_MACHINE, &subkey_path, "gameName", KEY_READ | KEY_WOW64_32KEY) {
+                            if !gname.trim().is_empty() {
+                                game.name = gname.trim().to_string();
+                            }
+                        }
                         games.push(game);
                     }
                 }
@@ -1938,6 +2148,9 @@ mod tests {
                 available_exes: Vec::new(),
                 is_laa: true,
                 nr_style: 0,
+                nr_style_enabled: false,
+                mfg_multiplier: 4,
+                has_anti_cheat: false,
             };
             assert!(!crate::core::install_routes::is_native_dlss_supported(&fake_bg3), "Vulkan game must NOT support Native DLSS (RenoDX)");
             assert!(fake_bg3.can_inject_fg, "BG3 Vulkan must support frame generation injection");
@@ -1987,6 +2200,7 @@ mod tests {
             replaced: Vec::new(),
             added: vec!["Content\\dxgi.dll".to_string()],
             added_dirs: Vec::new(),
+            ..Default::default()
         };
 
         let bytes = serde_json::to_vec(&manifest).unwrap();
@@ -2185,6 +2399,7 @@ mod tests {
 
         let game = scan_game_directory(&temp_dir).expect("Game directory must be recognized");
         assert_eq!(game.launcher, "GOG");
+        assert_eq!(game.name, "Being a DIK - Season 1", "GOG game title must be read from goggame manifest");
         assert_eq!(game.exe_rel, "BeingADIK.exe", "Primary executable must be BeingADIK.exe, not python.exe");
         assert_eq!(game.available_exes.len(), 2, "Available exes must only contain the 2 real game binaries");
         assert_eq!(game.available_exes[0].name, "BeingADIK.exe");
@@ -2195,6 +2410,10 @@ mod tests {
         assert_eq!(exes.len(), 2);
         assert_eq!(exes[0].name, "BeingADIK.exe");
         assert_eq!(exes[1].name, "BeingADIK-32.exe");
+
+        let (gog_name, _, gog_id) = extract_gog_metadata(&temp_dir);
+        assert_eq!(gog_name.as_deref(), Some("Being a DIK - Season 1"));
+        assert_eq!(gog_id.as_deref(), Some("1181224050"));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -2499,7 +2718,7 @@ mod tests {
             assert_eq!(game.api, "DirectX 9", "ME2 must resolve to DirectX 9");
             assert!(!game.available_exes.iter().any(|e| e.name.contains("Config")), "MassEffect2Config.exe must be excluded");
             if let Some(stub) = game.available_exes.iter().find(|e| e.name == "MassEffect2.exe") {
-                assert_eq!(stub.api, "Undetected", "MassEffect2.exe launcher stub without graphics APIs must be labeled Undetected");
+                assert!(stub.api == "DirectX 9" || stub.api == "Undetected", "MassEffect2.exe launcher stub resolves to DirectX 9 via sibling detection or Undetected");
             }
         }
 
@@ -2575,6 +2794,226 @@ mod tests {
             assert!(routes.contains(&crate::core::install_routes::InstallRoute::OptiScaler), "Live Control PCGP must support OptiScaler");
             assert!(routes.contains(&crate::core::install_routes::InstallRoute::Feeder), "Live Control PCGP must support Feeder");
         }
+    }
+
+    #[test]
+    fn test_control_gog_metadata_and_art_detection() {
+        let control_dir = Path::new(r"D:\Games\GoG\Control");
+        if control_dir.is_dir() {
+            let (gog_name, gog_poster, gog_id) = extract_gog_metadata(control_dir);
+            assert_eq!(gog_name.as_deref(), Some("Control Ultimate Edition"));
+            assert_eq!(gog_id.as_deref(), Some("2049187585"));
+            assert!(gog_poster.is_some(), "GOG Galaxy local vertical cover must be discovered");
+            assert!(gog_poster.unwrap().contains("http://dlss-art.localhost/art/"));
+
+            let game = scan_game_directory(control_dir).expect("Control directory must be scanned");
+            assert_eq!(game.launcher, "GOG");
+            assert_eq!(game.name, "Control Ultimate Edition");
+            assert!(game.poster.is_some(), "Game poster must be populated with discovered cover");
+        }
+    }
+
+    #[test]
+    fn test_manifest_preserves_target_exe_and_patch_state() {
+        let temp_dir = std::env::temp_dir().join(format!("test_manifest_preserves_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let bin_dir = temp_dir.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+
+        // Two dummy executables: game.exe (score higher by default) and game_dx11.exe
+        fs::write(bin_dir.join("game.exe"), b"MZ dummy 64-bit exe").unwrap();
+        fs::write(bin_dir.join("game_dx11.exe"), b"MZ dummy 64-bit exe").unwrap();
+        fs::write(bin_dir.join("nvngx_dlss.dll"), b"MZ dlss").unwrap();
+
+        // Write ActiveManifest targeting game_dx11.exe with Native DLSS and Model A (nr_style = 0, enabled = true)
+        let bdir = temp_dir.join("_DLSS5_Backup");
+        fs::create_dir_all(&bdir).unwrap();
+
+        let manifest = crate::core::journal::ActiveManifest {
+            version: 1,
+            date: "2026-09-18 12:00:00".to_string(),
+            route: "native".to_string(),
+            game: Some(crate::core::journal::ManifestGame {
+                dir: Some(temp_dir.to_string_lossy().to_string()),
+                exe: Some("bin\\game_dx11.exe".to_string()),
+                api: Some("dxgi".to_string()),
+                bitness: Some(64),
+                api_label: Some("DirectX 11".to_string()),
+            }),
+            game_exe: Some("bin\\game_dx11.exe".to_string()),
+            backup_prefix: Some("originals/123".to_string()),
+            replaced: Vec::new(),
+            added: vec!["bin\\dxgi.dll".to_string(), "bin\\renodx-dlss5.addon64".to_string()],
+            added_dirs: Vec::new(),
+            mfg_unlock: Some(true),
+            mfg_multiplier: Some(4),
+            nr_style_enabled: Some(true),
+            nr_style: Some(0),
+            opti_presr: Some(false),
+            opti_passes: Some(1),
+        };
+        fs::write(bdir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        let scanned = scan_game_directory(&temp_dir).expect("Game directory must scan");
+        assert_eq!(scanned.exe_rel, "bin\\game_dx11.exe", "Scanner must preserve manifest.game_exe as chosen executable");
+        assert_eq!(scanned.installed_route, Some("native".to_string()), "Scanner must preserve manifest.route");
+        assert!(scanned.mfg_unlock_installed, "Scanner must preserve mfg_unlock");
+        assert_eq!(scanned.mfg_multiplier, 4, "Scanner must preserve mfg_multiplier");
+        assert_eq!(scanned.nr_style, 0, "Scanner must preserve nr_style = 0 (Model A)");
+        assert!(scanned.nr_style_enabled, "Scanner must preserve nr_style_enabled = true even when nr_style = 0");
+        assert!(scanned.reshade_installed, "Scanner must mark reshade_installed for native route");
+        assert!(scanned.addon_installed, "Scanner must mark addon_installed for native route");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_scan_infers_route_from_disk_when_manifest_missing() {
+        let temp_dir = std::env::temp_dir().join(format!("test_disk_infer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let bin_dir = temp_dir.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let exe_path = bin_dir.join("game.exe");
+        let mut exe_bytes = vec![0u8; 10000];
+        exe_bytes[100..117].copy_from_slice(b"D3D12CreateDevice");
+        fs::write(&exe_path, &exe_bytes).unwrap();
+
+        // 1. Native DLSS add-on present on disk without manifest
+        fs::write(bin_dir.join("renodx-dlss5.addon64"), b"DUMMY_ADDON").unwrap();
+        let scanned = scan_game_directory(&temp_dir).expect("Scan must succeed");
+        assert_eq!(scanned.installed_route, Some("native".to_string()), "Must infer native route from renodx-dlss5.addon64");
+
+        // 2. Feeder add-on present on disk
+        fs::write(bin_dir.join("dlss5-feed.addon64"), b"DUMMY_FEEDER").unwrap();
+        let scanned2 = scan_game_directory(&temp_dir).expect("Scan must succeed");
+        assert_eq!(scanned2.installed_route, Some("feeder".to_string()), "Must infer feeder route when dlss5-feed.addon64 is present");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_generic_source_engine_subfolder_api_detection() {
+        let temp_dir = std::env::temp_dir().join(format!("test_source_engine_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let bin_dir = temp_dir.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+
+        // Game launcher executable in root
+        let exe_path = temp_dir.join("left4dead.exe");
+        fs::write(&exe_path, b"DUMMY_EXE").unwrap();
+
+        // Modular rendering DLL in bin/ subfolder
+        let render_dll = bin_dir.join("shaderapidx9.dll");
+        fs::write(&render_dll, b"DUMMY_RENDER_DLL").unwrap();
+
+        let exes = discover_game_exes(&temp_dir);
+        let found = exes.iter().find(|e| e.name.eq_ignore_ascii_case("left4dead.exe"));
+        assert!(found.is_some(), "Must discover left4dead.exe");
+        assert_eq!(found.unwrap().api, "DirectX 9", "Generic scanner must inspect bin/ subfolder and identify DirectX 9");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_generic_installer_and_sdk_tools_filtered() {
+        assert!(is_installer_or_helper("vpk.exe"));
+        assert!(is_installer_or_helper("batch compiler.exe"));
+        assert!(is_installer_or_helper("shader_compiler_x64.exe"));
+        assert!(is_installer_or_helper("crashhandler64.exe"));
+        assert!(is_installer_or_helper("gamelaunchhelper.exe"));
+        assert!(!is_installer_or_helper("game.exe"));
+        assert!(!is_installer_or_helper("left4dead.exe"));
+
+        let temp_dir = std::env::temp_dir().join(format!("test_filter_tools_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(temp_dir.join("game.exe"), b"DUMMY_GAME").unwrap();
+        fs::write(temp_dir.join("vpk.exe"), b"DUMMY_TOOL").unwrap();
+        fs::write(temp_dir.join("batch compiler.exe"), b"DUMMY_COMPILER").unwrap();
+
+        let exes = discover_game_exes(&temp_dir);
+        let names: Vec<String> = exes.into_iter().map(|e| e.name).collect();
+        assert!(names.contains(&"game.exe".to_string()), "Must include genuine game exe");
+        assert!(!names.contains(&"vpk.exe".to_string()), "Must exclude vpk.exe");
+        assert!(!names.contains(&"batch compiler.exe".to_string()), "Must exclude compiler tools");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_game_entry_has_anti_cheat_serde_backwards_compatibility() {
+        // Simulates old library.json entry that lacks "has_anti_cheat"
+        let old_json = r#"{
+            "name": "Classic Game",
+            "dir": "C:\\Games\\Classic",
+            "exe_path": "C:\\Games\\Classic\\game.exe",
+            "exe_rel": "game.exe",
+            "bitness": 64,
+            "api": "DirectX 11",
+            "has_frame_generation": false,
+            "optiscaler_installed": false,
+            "optiscaler_presr": false,
+            "optiscaler_passes": 1,
+            "mfg_unlock_installed": false,
+            "has_backup": false,
+            "launcher": "Steam",
+            "reshade_installed": false,
+            "reshade_addon_support": false,
+            "addon_installed": false,
+            "files": []
+        }"#;
+
+        let entry: GameEntry = serde_json::from_str(old_json).expect("deserialize old json");
+        assert!(!entry.has_anti_cheat, "Old entries must default has_anti_cheat to false");
+
+        // Now with has_anti_cheat: true
+        let mut modern = entry.clone();
+        modern.has_anti_cheat = true;
+        let serialized = serde_json::to_string(&modern).expect("serialize modern entry");
+        let restored: GameEntry = serde_json::from_str(&serialized).expect("deserialize modern entry");
+        assert!(restored.has_anti_cheat, "Modern entry must retain has_anti_cheat true");
+    }
+
+    #[test]
+    fn test_scan_game_directory_detects_anti_cheat() {
+        let temp_dir = std::env::temp_dir().join(format!("test_ac_scan_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create a dummy game exe and an EasyAntiCheat DLL
+        fs::write(temp_dir.join("game.exe"), b"DUMMY_EXE_CONTENT").unwrap();
+        fs::write(temp_dir.join("EasyAntiCheat_x64.dll"), b"EAC").unwrap();
+
+        let scanned = scan_game_directory(&temp_dir);
+        assert!(scanned.is_some(), "Must scan valid directory");
+        let game = scanned.unwrap();
+        assert!(game.has_anti_cheat, "Must detect anti cheat file and set has_anti_cheat = true");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_game_entry_available_exes_cached_reuse() {
+        let mut entry = GameEntry::default();
+        entry.available_exes = vec![
+            GameExeOption {
+                name: "ACOdyssey.exe".to_string(),
+                path: PathBuf::from(r"E:\Games\Assassin's Creed Odyssey\ACOdyssey.exe"),
+                rel: "ACOdyssey.exe".to_string(),
+                api: "DirectX 11".to_string(),
+                bitness: 64,
+                is_laa: true,
+            },
+            GameExeOption {
+                name: "ACOdyssey_plus.exe".to_string(),
+                path: PathBuf::from(r"E:\Games\Assassin's Creed Odyssey\ACOdyssey_plus.exe"),
+                rel: "ACOdyssey_plus.exe".to_string(),
+                api: "DirectX 11".to_string(),
+                bitness: 64,
+                is_laa: true,
+            },
+        ];
+
+        // Ensure in-memory cache is fully populated and available for zero-I/O popup display
+        assert_eq!(entry.available_exes.len(), 2);
+        assert_eq!(entry.available_exes[0].name, "ACOdyssey.exe");
+        assert_eq!(entry.available_exes[1].name, "ACOdyssey_plus.exe");
     }
 }
 

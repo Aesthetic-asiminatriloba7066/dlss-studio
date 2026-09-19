@@ -26,19 +26,14 @@ pub const FONTATLAS_PNG_SHA256: &str = "11a711a8167d1c1606892e6fa6f661a477e749d6
 
 pub const MFG_10_URL: &str = "https://github.com/mavismmg/MFGAdaUnlock-RenoDx/releases/download/1.0/renodx-mfgunlock.addon64";
 pub const MFG_10_SHA256: &str = "f9f10c685e3e89077f751df2394a1629615a56b58d111dff26b39894e772d50e";
-pub const MFG_09_URL: &str = MFG_10_URL;
-pub const MFG_09_SHA256: &str = MFG_10_SHA256;
 
 pub const OPTISCALER_084_URL: &str = "https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/download/v0.8.4/OptiScaler-NR-v0.8.4.zip";
 pub const OPTISCALER_084_SHA256: &str = "8789912859882e66b3f3a1aa768db947da779dfd65225df69ea919052e73a2e4";
-pub const OPTISCALER_083_URL: &str = OPTISCALER_084_URL;
-pub const OPTISCALER_083_SHA256: &str = OPTISCALER_084_SHA256;
 
 pub const RENODX_DLSS5_URL: &str = "https://github.com/yumlevi/renodx-dlss-installer/releases/download/latest/renodx-dlss5.addon64";
 pub const STREAMLINE_ZIP_URL: &str = "https://github.com/yumlevi/renodx-dlss-installer/releases/download/latest/streamline.zip";
 pub const RESHADE_SETUP_URL: &str = "https://reshade.me/downloads/ReShade_Setup_6.8.0_Addon.exe";
 pub const RESHADE_SETUP_SHA256: &str = "afe4c8f13048306307983b8b3d41d5bf00a86820440b0e57dea10950e1176445";
-pub const RESHADE64_SHA256: &str = "0cee63f9c9f13f3ac909c5b4903f4dbb4b719a7ab3b4f13b0deaf83c814b94f7";
 
 pub const DGVOODOO_URL: &str = "https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.5/dgVoodoo2_87_5.zip";
 pub const DGVOODOO_SHA256: &str = "5ffde6927f7355ca3fdd5d785b581256a8e6539fa13e395a891ade6ba1040850";
@@ -78,12 +73,6 @@ pub fn compute_sha256(path: &Path) -> std::io::Result<String> {
         hasher.update(&buffer[..bytes_read]);
     }
     Ok(hex::encode(hasher.finalize()))
-}
-
-pub fn compute_bytes_sha256(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -772,68 +761,6 @@ pub async fn ensure_mfg_v09_addon(log: &mut Vec<String>) -> Result<PathBuf, Stri
     Ok(target)
 }
 
-/// Asynchronously resolves or downloads the latest OptiScaler DLSS-NR v0.8.4 runtime
-pub async fn ensure_optiscaler_083_components(log: &mut Vec<String>) -> Result<PathBuf, String> {
-    let comp_root = get_components_root();
-    let opti_dir = comp_root.join("OptiScaler-0.8.4-dlssnr");
-    if opti_dir.join("OptiScaler.dll").is_file() {
-        return Ok(opti_dir);
-    }
-    let fallback_083 = comp_root.join("OptiScaler-0.8.3-dlssnr");
-    if fallback_083.join("OptiScaler.dll").is_file() {
-        return Ok(fallback_083);
-    }
-    let fallback_077 = comp_root.join("OptiScaler-0.7.7-dlssnr");
-    if fallback_077.join("OptiScaler.dll").is_file() {
-        return Ok(fallback_077);
-    }
-
-    let zip_path = comp_root.join("OptiScaler-NR-v0.8.4.zip");
-    log.push("[DOWNLOAD] Fetching latest OptiScaler DLSS-NR v0.8.4 from upstream...".to_string());
-    download_file_with_sha256(OPTISCALER_084_URL, &zip_path, OPTISCALER_084_SHA256).await?;
-    log.push("[DOWNLOAD] Verifying OptiScaler DLSS-NR v0.8.4 SHA-256: OK".to_string());
-
-    let file = fs::File::open(&zip_path).map_err(|e| format!("Failed to open {}: {}", zip_path.display(), e))?;
-    extract_zip(file, &opti_dir)?;
-    log.push("[OPTISCALER] OptiScaler DLSS-NR v0.8.4 unpacked successfully".to_string());
-    let _ = fs::remove_file(&zip_path);
-
-    Ok(opti_dir)
-}
-
-/// Asynchronously resolves or downloads the RenoDX v4.7 Integrated DLSS 5 Engine addon
-pub async fn ensure_renodx_dlss5_addon(log: &mut Vec<String>) -> Result<PathBuf, String> {
-    let comp_root = get_components_root();
-    let renodx_dir = comp_root.join("renodx-dlss5");
-    let target = renodx_dir.join("renodx-dlss5.addon64");
-    if target.is_file() {
-        return Ok(target);
-    }
-    fs::create_dir_all(&renodx_dir).map_err(|e| format!("Failed to create {}: {}", renodx_dir.display(), e))?;
-
-    log.push("[DOWNLOAD] Fetching RenoDX v4.7 Integrated Engine from upstream...".to_string());
-    download_file_with_sha256(RENODX_DLSS5_URL, &target, "").await?;
-    log.push("[DOWNLOAD] RenoDX v4.7 Engine verified and ready".to_string());
-    Ok(target)
-}
-
-/// Asynchronously resolves or downloads the Streamline Runtime components
-pub async fn ensure_streamline_components(log: &mut Vec<String>) -> Result<PathBuf, String> {
-    let comp_root = get_components_root();
-    let streamline_dir = comp_root.join("streamline-2.14.1").join("streamline");
-    if streamline_dir.join("sl.interposer.dll").is_file() && streamline_dir.join("sl.common.dll").is_file() {
-        return Ok(streamline_dir);
-    }
-    let zip_path = comp_root.join("streamline.zip");
-    log.push("[DOWNLOAD] Fetching Streamline Runtime from upstream...".to_string());
-    download_file_with_sha256(STREAMLINE_ZIP_URL, &zip_path, "").await?;
-    let file = fs::File::open(&zip_path).map_err(|e| format!("Failed to open {}: {}", zip_path.display(), e))?;
-    extract_zip(file, &comp_root.join("streamline-2.14.1"))?;
-    let _ = fs::remove_file(&zip_path);
-    log.push("[STREAMLINE] Streamline Runtime ready".to_string());
-    Ok(streamline_dir)
-}
-
 /// Checks whether the RenoDX 4x MFG Unlock addon is cached on disk
 pub fn is_mfg_addon_cached() -> bool {
     let root = get_components_root();
@@ -1184,26 +1111,9 @@ where
     }
 }
 
-/// Orchestrates the automated background downloading of all mandatory components
-pub async fn ensure_all_mandatory_components<F>(mut progress_fn: F) -> Result<(), String>
-where
-    F: FnMut(&str),
-{
-    ensure_all_mandatory_components_with_progress(|prog| {
-        progress_fn(&prog.message);
-    }).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_compute_bytes_sha256() {
-        let data = b"test payload string";
-        let hash = compute_bytes_sha256(data);
-        assert_eq!(hash.len(), 64);
-    }
 
     #[test]
     fn test_zip_extraction_mock() {
@@ -1222,9 +1132,9 @@ mod tests {
         assert!(out_dir.join("sample.txt").exists());
         assert_eq!(fs::read_to_string(out_dir.join("sample.txt")).unwrap(), "hello world");
 
-        // Test compute_sha256 on a real file
+        // Test compute_sha256 on a real file (known SHA-256 of "hello world")
         let hash = compute_sha256(&out_dir.join("sample.txt")).unwrap();
-        assert_eq!(hash, compute_bytes_sha256(b"hello world"));
+        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
 
         // Test components root
         let comp_root = get_components_root();
