@@ -8,7 +8,7 @@ name = "dlss5-swapper-rust"
 version = "1.0.7"
 edition = "2021"
 default-run = "dlss-studio"
-description = "DLSS 5 Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"
+description = "DLSS Studio - Ultra-low latency, low-memory DLSS 5 & OptiScaler Pre-SR Manager in Pure Rust"
 repository = "https://github.com/bookamp/dlss-studio"
 license = "MIT"
 

@@ -1,4 +1,4 @@
-name: Build & Release DLSS 5 Swapper (RUST)
+name: Build & Release DLSS Studio
 
 "on":
   push:
@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Windows Release & MSI Installer
+    name: Build Windows Release (Setup & Portable)
     runs-on: windows-latest
 
     steps:
@@ -104,7 +104,7 @@ jobs:
             if [ -n "$FIRST_HEADER" ]; then
               TITLE="${FIRST_HEADER}"
             else
-              TITLE="${TAG} — DLSS 5 Studio"
+              TITLE="${TAG} — DLSS Studio"
             fi
           else
             TITLE="${TAG} — ${COMMIT_SUBJECT}"
