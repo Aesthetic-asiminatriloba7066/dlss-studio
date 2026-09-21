@@ -1,25 +1,21 @@
-# DLSS 5 Studio v1.0.7 ⚡
+# DLSS 5 Studio v1.0.8 ⚡
 
-> **Window drag modal event fix across all screens, theme-harmonious squircle accordion trigger, high-contrast Light Theme contrast & badges, 2-second copy toast auto-dismiss timer, and complete multilingual translation coverage.**
+> **Feeder route Multi-Frame Generation detection (resolves Issue #7), DirectX 11 Technical Incompatibility Advisory with Anti-Suppression, and 5-manifest backup retention engine.**
 
 ---
 
 ### 🚀 Highlights & Improvements
 
-- **Window Drag Event Fix Across All Screens**:
-  - Resolved an issue where clicks, toggles, and switches on **Add-ons**, **History**, **Settings**, and **About** screens failed to register.
-  - Bounded window dragging strictly to designated header surfaces (`.toolbar`, `.brand`, and empty sidebar spacer) with native CSS drag regions (`-webkit-app-region: drag` and `no-drag !important`).
-- **Theme-Harmonious Accordion Trigger (Detected Graphics Modules)**:
-  - Replaced the mismatched circular glowing coin with a **20×20px rounded squircle (`border-radius: 6px`)** that mirrors the shape, scale, and left-alignment of the feature checkboxes directly above it (`chkNrStyle`, `chkMfg`).
-  - Rendered with a razor-sharp 12×12px SVG chevron polyline (`stroke-width: 2.8px`) that smoothly rotates 90° on expand.
-- **High-Contrast Light Theme Styling**:
-  - Eliminated blurry yellow glow washes on white backgrounds.
-  - Added dedicated high-contrast light theme colors for the chevron (`#9a3412` rust with `#b45309` border) and summary badges (NVIDIA, AMD, Streamline, OptiScaler).
-- **Toast Feedback 2-Second Auto-Dismiss Timer**:
-  - Added an automatic 2000ms dismiss timer with debounced multi-click reset and micro-animation for all copy actions across the application.
-- **Complete Multilingual Translation & Terminal Status**:
-  - Localized the execution log terminal status (`@{status_ready}`) and added complete translations across all 13 supported languages.
-  - Cleaned up obsolete emulator references and refined modular engine runtime detection.
+- **Feeder Route Multi-Frame Generation Detection (Issue #7)**:
+  - Resolved a contradiction where games utilizing the DLSS 5 Feeder route showed "Unsupported (requires native DLSS-G)" in the specifications panel despite having MFG active via the Feeder path.
+  - The game detail panel now specifically inspects for active Feeder route deployments rather than checking solely for native DLSS-G.
+- **DirectX 11 Route Incompatibility Advisory & Anti-Suppression**:
+  - When inspecting pure DirectX 11 games (such as *A Plague Tale: Innocence*), the UI now presents an explicit **High Incompatibility Advisory** banner explaining that Multi-Frame Generation and certain OptiScaler paths require DirectX 12 presentation pipelines and motion vectors.
+  - Added an anti-suppression architecture ensuring prior feeder manifests or proxy hooks cannot suppress compatibility warnings or falsely declare DX12-exclusive features supported.
+  - Includes a "Deploy with Force Override" button (`btn_deploy_override`) with dedicated warning styles and complete localization across all 13 supported languages.
+- **5-Manifest Backup Retention Engine (`prune_old_manifests`)**:
+  - Implemented an automatic journal pruning engine retaining the top 5 most recent `manifest.json.done-*` backup records.
+  - Automatically cleans orphaned `originals/{timestamp}` backup directories no longer referenced by active or retained manifests, keeping backup storage lean and organized.
 
 ---
 
@@ -27,12 +23,23 @@
 
 | File | Type | Description |
 | :--- | :--- | :--- |
-| **`dlss-studio-v1.0.7-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
-| **`dlss-studio-v1.0.7-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
+| **`dlss-studio-v1.0.8-setup.exe`** | Standalone Setup / Installer (Recommended) | Native Rust setup wizard with configurable install and data storage locations, in-place update detection, Start Menu & Desktop shortcuts, and Windows registration. |
+| **`dlss-studio-v1.0.8-portable.exe`** | Portable Executable | Standalone self-contained executable. Run anywhere with no installation required. |
 
 ---
 
 ### 📜 Previous Releases
+
+<details>
+<summary><b>DLSS 5 Studio v1.0.7 — Window Drag Event Fix & Squircle Accordion Release</b></summary>
+
+- **Window Drag Event Fix Across All Screens**: Bounded window dragging strictly to designated header surfaces (`.toolbar`, `.brand`, and empty sidebar spacer).
+- **Theme-Harmonious Accordion Trigger**: 20×20px rounded squircle with razor-sharp SVG chevron matching feature checkboxes.
+- **High-Contrast Light Theme Styling**: Eliminated glow washes with high-contrast rust and badge colors.
+- **Toast Feedback 2-Second Auto-Dismiss Timer**: 2000ms dismiss timer with debounced multi-click reset.
+- **Complete Multilingual Translation**: Localized strings across all 13 supported languages.
+
+</details>
 
 <details>
 <summary><b>DLSS 5 Studio v1.0.6 — Route Advisory Engine & Deployment Reflection Release</b></summary>

@@ -1665,6 +1665,19 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
 
     let bitness = crate::core::pe::inspect_pe(&opts.exe_path).map(|p| p.bitness).unwrap_or(64);
 
+    let api_lower = opts.api.to_lowercase();
+    let is_dx11 = api_lower.contains("11") || api_lower == "d3d11";
+    let is_vulkan = api_lower.contains("vulkan");
+    let is_dx12 = api_lower.contains("12") || api_lower.contains("d3d12") || api_lower.contains("dxgi");
+    let has_native_dlssg = mod_root.join("nvngx_dlssg.dll").is_file()
+        || mod_root.join("sl.dlss_g.dll").is_file()
+        || opts.game_dir.join("nvngx_dlssg.dll").is_file();
+    let api_supports_fg = bitness == 64 && (has_native_dlssg || is_vulkan || is_dx12) && !is_dx11;
+
+    let state = crate::core::state::load_state();
+    let mfg_active = crate::core::state::is_addon_active(&state, "builtin:mfgunlock");
+    let effective_mfg = opts.mfg_unlock && api_supports_fg && mfg_active;
+
     let mut manifest = ActiveManifest {
         version: 1,
         date: crate::core::journal::now_timestamp_str(),
@@ -1672,7 +1685,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         game: Some(ManifestGame {
             dir: Some(opts.game_dir.to_string_lossy().to_string()),
             exe: Some(exe_rel.clone()),
-            api: Some(if opts.api.to_lowercase().contains("vulkan") { "vulkan".to_string() } else { "dxgi".to_string() }),
+            api: Some(if is_vulkan { "vulkan".to_string() } else { "dxgi".to_string() }),
             bitness: Some(bitness),
             api_label: Some(opts.api.clone()),
         }),
@@ -1681,7 +1694,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         replaced: Vec::new(),
         added: Vec::new(),
         added_dirs: Vec::new(),
-        mfg_unlock: Some(opts.mfg_unlock),
+        mfg_unlock: Some(effective_mfg),
         mfg_multiplier: Some(opts.mfg_multiplier),
         nr_style_enabled: Some(opts.nr_style_enabled),
         nr_style: Some(opts.nr_style),
@@ -1691,7 +1704,6 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
 
     carry_forward_existing_backups(&opts.game_dir, &backup_dir, &mut manifest, &mut log);
 
-    let api_lower = opts.api.to_lowercase();
     let is_legacy_dx = api_lower.contains('9') || api_lower.contains('8') || api_lower.contains("d3d9") || api_lower.contains("d3d8");
     let use_dgvoodoo = is_legacy_dx && payloads.dgvoodoo.is_some();
 
@@ -1811,7 +1823,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
 
     let state = crate::core::state::load_state();
     let renodx_active = crate::core::state::is_addon_active(&state, "builtin:renodx");
-    let mfg_active = crate::core::state::is_addon_active(&state, "builtin:mfgunlock");
+    let _mfg_active = crate::core::state::is_addon_active(&state, "builtin:mfgunlock");
 
     let mut deployed_addon_stems: Vec<String> = Vec::new();
 
@@ -1976,15 +1988,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
     }
 
     // 4. Deploy Streamline Feeder addons when MFG is enabled (supported on 64-bit titles with native DLSS-G, DX12/DXGI, or Vulkan)
-    let api_lower = opts.api.to_lowercase();
-    let is_dx11 = api_lower.contains("11") || api_lower == "d3d11";
-    let is_vulkan = api_lower.contains("vulkan");
-    let is_dx12 = api_lower.contains("12") || api_lower.contains("d3d12") || api_lower.contains("dxgi");
-    let has_native_dlssg = mod_root.join("nvngx_dlssg.dll").is_file()
-        || mod_root.join("sl.dlss_g.dll").is_file()
-        || opts.game_dir.join("nvngx_dlssg.dll").is_file();
-    let api_supports_fg = bitness == 64 && (has_native_dlssg || is_vulkan || is_dx12) && !is_dx11;
-    if opts.mfg_unlock && api_supports_fg && mfg_active {
+    if effective_mfg {
         if let Some(mfg_src) = &payloads.renodx_mfgunlock_addon {
             if mfg_src.is_file() {
                 let dest = mod_root.join("renodx-mfgunlock.addon64");
@@ -2016,7 +2020,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
     // 5. Configure ReShade.ini for Feeder
     let reshade_ini_path = mod_root.join("ReShade.ini");
     let existing_reshade_ini = fs::read_to_string(&reshade_ini_path).unwrap_or_default();
-    let mut configured_reshade_ini = if opts.mfg_unlock && api_supports_fg {
+    let mut configured_reshade_ini = if effective_mfg {
         configure_mfg_unlock_ini(&existing_reshade_ini, Some(opts.mfg_multiplier))
     } else {
         existing_reshade_ini
@@ -2064,7 +2068,7 @@ pub fn deploy_feeder_with_bundle(opts: &DeployOptions, payloads: &PayloadBundle)
         added,
     });
 
-    let mfg_desc = if opts.mfg_unlock {
+    let mfg_desc = if effective_mfg {
         format!("{}x Streamline Feeder companion add-on", opts.mfg_multiplier)
     } else {
         "disabled".to_string()
