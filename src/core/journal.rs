@@ -174,12 +174,125 @@ pub fn read_latest_done_manifest(game_dir: &Path) -> Option<ActiveManifest> {
 }
 
 
+pub fn prune_old_manifests(game_dir: &Path, max_keep: usize) -> usize {
+    let bdir = backup_dir(game_dir);
+    if !bdir.exists() {
+        return 0;
+    }
+
+    let entries = match fs::read_dir(&bdir) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+
+    let mut done_files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("manifest.json.done-"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Sort descending by file name (which includes epoch timestamp)
+    done_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    // Collect all referenced backup_prefix strings from retained / active manifests
+    let mut referenced_prefixes = std::collections::HashSet::new();
+
+    // 1. Active manifest
+    if let Some(active) = read_manifest(game_dir) {
+        if let Some(prefix) = active.backup_prefix {
+            referenced_prefixes.insert(prefix);
+        }
+    }
+
+    // 2. Pending switch manifest (if any)
+    let pending_path = bdir.join("pending-switch.json");
+    if let Ok(bytes) = fs::read(&pending_path) {
+        if let Ok(pending) = serde_json::from_slice::<ActiveManifest>(&bytes) {
+            if let Some(prefix) = pending.backup_prefix {
+                referenced_prefixes.insert(prefix);
+            }
+        }
+    }
+
+    // 3. Top `max_keep` retained done manifests
+    let retained_count = done_files.len().min(max_keep);
+    for p in &done_files[..retained_count] {
+        if let Ok(bytes) = fs::read(p) {
+            if let Ok(m) = serde_json::from_slice::<ActiveManifest>(&bytes) {
+                if let Some(prefix) = m.backup_prefix {
+                    referenced_prefixes.insert(prefix);
+                }
+            }
+        }
+    }
+
+    let mut pruned_count = 0;
+
+    // Prune excess done manifests
+    if done_files.len() > max_keep {
+        for p in &done_files[max_keep..] {
+            let prefix_opt = if let Ok(bytes) = fs::read(p) {
+                serde_json::from_slice::<ActiveManifest>(&bytes)
+                    .ok()
+                    .and_then(|m| m.backup_prefix)
+            } else {
+                None
+            };
+
+            if fs::remove_file(p).is_ok() {
+                pruned_count += 1;
+                crate::core::logger::debug("journal", &format!("Pruned old archived manifest: {}", p.display()));
+
+                // If this manifest had a backup_prefix that is NOT referenced anywhere else, clean it up
+                if let Some(prefix) = prefix_opt {
+                    if !referenced_prefixes.contains(&prefix) {
+                        let prefix_path = bdir.join(&prefix);
+                        if prefix_path.is_dir() {
+                            let _ = fs::remove_dir_all(&prefix_path);
+                            crate::core::logger::info("journal", &format!("Cleaned orphaned backup directory: {}", prefix_path.display()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also check the "originals" folder directly for any orphaned subdirectories
+    let originals_dir = bdir.join("originals");
+    if originals_dir.is_dir() {
+        if let Ok(orig_entries) = fs::read_dir(&originals_dir) {
+            for entry in orig_entries.flatten() {
+                let sub_path = entry.path();
+                if sub_path.is_dir() {
+                    let rel_prefix = format!("originals/{}", entry.file_name().to_string_lossy());
+                    if !referenced_prefixes.contains(&rel_prefix) {
+                        let _ = fs::remove_dir_all(&sub_path);
+                        crate::core::logger::info("journal", &format!("Cleaned unreferenced originals directory: {}", sub_path.display()));
+                    }
+                }
+            }
+        }
+    }
+
+    if pruned_count > 0 {
+        crate::core::logger::info("journal", &format!("Pruned {} old archived manifests (retained top {}) for {}", pruned_count, max_keep, game_dir.display()));
+    }
+
+    pruned_count
+}
+
 pub fn save_manifest(game_dir: &Path, manifest: &ActiveManifest) -> std::io::Result<()> {
     crate::core::logger::info("journal", &format!("Saving active manifest for {}: route={}, replaced={}, added={}", game_dir.display(), manifest.route, manifest.replaced.len(), manifest.added.len()));
     let bdir = backup_dir(game_dir);
     fs::create_dir_all(&bdir)?;
     let bytes = serde_json::to_vec_pretty(manifest)?;
     fs::write(bdir.join("manifest.json"), bytes)?;
+    let _ = prune_old_manifests(game_dir, 5);
     Ok(())
 }
 
@@ -394,6 +507,7 @@ pub fn clean_untracked_mods_with_exe(game_dir: &Path, exe_path: Option<&Path>) -
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
         let archive_name = format!("manifest.json.done-{}", ts);
         let _ = fs::rename(&manifest_path, bdir.join(&archive_name));
+        let _ = prune_old_manifests(game_dir, 5);
     }
 
     if !removed.is_empty() {
@@ -481,6 +595,7 @@ pub fn restore_game(game_dir: &Path) -> std::io::Result<bool> {
         let archive_name = format!("manifest.json.done-{}", ts);
         let _ = fs::rename(&manifest_path, bdir.join(&archive_name));
         crate::core::logger::info("restore", &format!("Archived manifest to: {}", archive_name));
+        let _ = prune_old_manifests(game_dir, 5);
     }
 
     crate::core::logger::info("restore", &format!("Restore successfully completed for {}", game_dir.display()));
@@ -727,6 +842,64 @@ mod tests {
         fs::create_dir_all(backup_dir(&temp)).unwrap();
         fs::write(&m_path, b"invalid-json").unwrap();
         assert!(read_manifest(&temp).is_none());
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_prune_old_manifests_keeps_last_5_and_cleans_orphaned_originals() {
+        let temp = std::env::temp_dir().join(format!("dlss_prune_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let bdir = temp.join("_DLSS5_Backup");
+        fs::create_dir_all(&bdir).unwrap();
+
+        // Create 8 archived done manifests (ts 100 to 800)
+        for i in 1..=8 {
+            let ts = 1000 + i * 100;
+            let prefix = format!("originals/{}", ts);
+            let orig_dir = bdir.join(&prefix);
+            fs::create_dir_all(&orig_dir).unwrap();
+            fs::write(orig_dir.join("dxgi.dll"), b"mock-orig").unwrap();
+
+            let manifest = ActiveManifest {
+                backup_prefix: Some(prefix),
+                ..Default::default()
+            };
+            let bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+            fs::write(bdir.join(format!("manifest.json.done-{}", ts)), bytes).unwrap();
+        }
+
+        // Active manifest references originals/1800
+        let active_manifest = ActiveManifest {
+            backup_prefix: Some("originals/1800".to_string()),
+            ..Default::default()
+        };
+        let active_bytes = serde_json::to_vec_pretty(&active_manifest).unwrap();
+        fs::write(bdir.join("manifest.json"), active_bytes).unwrap();
+
+        // Run pruner keeping top 5
+        let pruned = prune_old_manifests(&temp, 5);
+        assert_eq!(pruned, 3, "Must prune 3 older manifests out of 8");
+
+        // Verify remaining done manifests: 1800, 1700, 1600, 1500, 1400 should exist
+        assert!(bdir.join("manifest.json.done-1800").exists());
+        assert!(bdir.join("manifest.json.done-1700").exists());
+        assert!(bdir.join("manifest.json.done-1600").exists());
+        assert!(bdir.join("manifest.json.done-1500").exists());
+        assert!(bdir.join("manifest.json.done-1400").exists());
+
+        // 1300, 1200, 1100 must be deleted
+        assert!(!bdir.join("manifest.json.done-1300").exists());
+        assert!(!bdir.join("manifest.json.done-1200").exists());
+        assert!(!bdir.join("manifest.json.done-1100").exists());
+
+        // Verify orphaned originals/1300, 1200, 1100 were cleaned up
+        assert!(!bdir.join("originals/1300").exists());
+        assert!(!bdir.join("originals/1200").exists());
+        assert!(!bdir.join("originals/1100").exists());
+
+        // Retained originals/1400 to 1800 must still exist
+        assert!(bdir.join("originals/1400").exists());
+        assert!(bdir.join("originals/1800").exists());
 
         let _ = fs::remove_dir_all(&temp);
     }
